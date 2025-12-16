@@ -2,6 +2,25 @@ const API_BASE = "/admin";
 let currentScenario = null;
 let currentQuestions = [];
 
+// --- Notification System ---
+function showNotification(title, message) {
+    const overlay = document.createElement('div');
+    overlay.className = 'notification-overlay';
+    overlay.innerHTML = `
+        <div class="notification-modal">
+            <div class="icon"><i class="fas fa-check-circle"></i></div>
+            <h3>${title}</h3>
+            <p>${message}</p>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    setTimeout(() => {
+        overlay.style.opacity = '0';
+        setTimeout(() => overlay.remove(), 200);
+    }, 1500);
+}
+
 // --- Tab Switching ---
 function openTab(tabId) {
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -23,8 +42,9 @@ async function loadScenarios() {
 
     data.forEach(s => {
         const li = document.createElement('li');
+        li.dataset.scenarioId = s.id; // Store ID for precise matching
         li.innerHTML = `
-            <span onclick="selectScenario(${s.id})"><i class="fas fa-file-alt" style="margin-right:8px; color:#bbb;"></i>${s.name}</span>
+            <span onclick="selectScenario(${s.id})"><i class="fas fa-file-alt" style="margin-right:8px; color:#bbb;"></i>${escapeHtml(s.name)}</span>
             <button class="list-copy-btn" onclick="event.stopPropagation(); copyScenario(${s.id})">コピー</button>
         `;
         if (currentScenario && currentScenario.id === s.id) {
@@ -39,10 +59,12 @@ async function selectScenario(scenarioId) {
     const scenario = await res.json();
     currentScenario = scenario;
 
-    // UI Update
-    document.querySelectorAll('#scenario-list li').forEach(l => l.classList.remove('active'));
+    // UI Update - Use dataset for precise matching
     document.querySelectorAll('#scenario-list li').forEach(l => {
-        if (l.textContent.includes(scenario.name)) l.classList.add('active');
+        l.classList.remove('active');
+        if (parseInt(l.dataset.scenarioId) === scenarioId) {
+            l.classList.add('active');
+        }
     });
 
     document.getElementById('welcome-message').classList.add('hidden');
@@ -104,7 +126,6 @@ async function saveScenario() {
     if (res.ok) {
         const saved = await res.json();
         if (!id) {
-            // New creation - set current scenario
             currentScenario = saved;
             document.getElementById('scenario-id').value = saved.id;
             document.getElementById('editor-title').textContent = "シナリオ編集: " + saved.name;
@@ -121,7 +142,7 @@ document.getElementById('scenario-form').onsubmit = async (e) => {
     const saved = await saveScenario();
     if (saved) {
         loadScenarios();
-        alert('保存しました');
+        showNotification('保存完了', `シナリオ「${saved.name}」を保存しました`);
     }
 };
 
@@ -135,7 +156,6 @@ async function copyScenario(scenarioId) {
     const scenario = await res.json();
     const name = scenario.name + " (コピー)";
 
-    // Create Scenario
     let createRes = await fetch(`${API_BASE}/scenarios/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -147,7 +167,6 @@ async function copyScenario(scenarioId) {
     });
     const newScenario = await createRes.json();
 
-    // Copy Questions
     const qRes = await fetch(`${API_BASE}/scenarios/${scenarioId}/questions`);
     const questions = await qRes.json();
 
@@ -163,18 +182,18 @@ async function copyScenario(scenarioId) {
         });
     }
 
-    // Immediately select the new scenario (fast response)
     await selectScenario(newScenario.id);
-
-    // Then refresh list in background
     loadScenarios();
+    showNotification('コピー完了', `シナリオ「${newScenario.name}」を作成しました`);
 }
 
 async function deleteCurrentScenario() {
     if (!confirm("本当に削除しますか？")) return;
+    const deletedName = currentScenario.name;
     await fetch(`${API_BASE}/scenarios/${currentScenario.id}`, { method: 'DELETE' });
     loadScenarios();
     showCreateScenarioForm();
+    showNotification('削除完了', `シナリオ「${deletedName}」を削除しました`);
 }
 
 // --- Questions ---
@@ -221,12 +240,10 @@ function populateOrderSelect() {
         }
     }
 
-    // If editing, add current value
     const currentEditId = document.getElementById('question-id').value;
     if (currentEditId) {
         const editingQ = currentQuestions.find(q => q.id == currentEditId);
         if (editingQ) {
-            // Re-add the current order for editing
             const currentOrder = editingQ.sort_order;
             if (!Array.from(select.options).find(o => o.value == currentOrder)) {
                 const opt = document.createElement('option');
@@ -257,14 +274,12 @@ function resetQuestionForm() {
 document.getElementById('question-form').onsubmit = async (e) => {
     e.preventDefault();
 
-    // Auto-save scenario if not saved yet
     if (!currentScenario || !document.getElementById('scenario-id').value) {
         const saved = await saveScenario();
         if (!saved) {
             alert('シナリオの保存に失敗しました');
             return;
         }
-        // Refresh list to show new scenario
         loadScenarios();
     }
 
@@ -292,12 +307,15 @@ document.getElementById('question-form').onsubmit = async (e) => {
 
     resetQuestionForm();
     await loadQuestions(currentScenario.id);
+    showNotification('保存完了', `質問「${text.substring(0, 20)}...」を保存しました`);
 };
 
 async function deleteQuestion(id) {
     if (!confirm('この質問を削除しますか？')) return;
+    const q = currentQuestions.find(q => q.id === id);
     await fetch(`${API_BASE}/questions/${id}`, { method: 'DELETE' });
     await loadQuestions(currentScenario.id);
+    showNotification('削除完了', `質問を削除しました`);
 }
 
 // --- Numbers & Logs ---
@@ -307,7 +325,7 @@ async function loadPhoneNumbers() {
     const select = document.getElementById('number-scenario-select');
     select.innerHTML = '<option value="">選択してください</option>';
     scenarios.forEach(s => {
-        select.innerHTML += `<option value="${s.id}">${s.name}</option>`;
+        select.innerHTML += `<option value="${s.id}">${escapeHtml(s.name)}</option>`;
     });
 
     const res = await fetch(`${API_BASE}/phone_numbers/`);
@@ -316,13 +334,13 @@ async function loadPhoneNumbers() {
     tbody.innerHTML = '';
     data.forEach(p => {
         const sc = scenarios.find(s => s.id === p.scenario_id);
-        const scName = sc ? sc.name : `ID: ${p.scenario_id}`;
+        const scName = sc ? escapeHtml(sc.name) : `ID: ${p.scenario_id}`;
 
         tbody.innerHTML += `
             <tr>
-                <td>${p.to_number}</td>
+                <td>${escapeHtml(p.to_number)}</td>
                 <td>${scName}</td>
-                <td>${p.label || '-'}</td>
+                <td>${escapeHtml(p.label || '-')}</td>
                 <td><button class="small secondary">編集</button></td>
             </tr>`;
     });
@@ -340,7 +358,7 @@ document.getElementById('number-form').onsubmit = async (e) => {
         body: JSON.stringify({ to_number: to, scenario_id: parseInt(sid), label: label, is_active: true })
     });
     loadPhoneNumbers();
-    alert('保存しました');
+    showNotification('保存完了', `電話番号「${to}」を設定しました`);
 };
 
 async function loadLogs() {
@@ -359,8 +377,8 @@ async function loadLogs() {
             call.answers.forEach(a => {
                 let rec = a.recording_url_twilio ? `<a href="${a.recording_url_twilio}" target="_blank"><i class="fas fa-play"></i></a>` : '';
                 answersHtml += `<div style="font-size:0.9rem; margin-bottom:4px;">
-                    <span style="color:#aaa;">Q:</span> ${a.question_text || '??'} <br>
-                    <span style="color:#3498db;">A:</span> ${rec} ${a.transcript_text || '(音声のみ)'}
+                    <span style="color:#aaa;">Q:</span> ${escapeHtml(a.question_text || '??')} <br>
+                    <span style="color:#3498db;">A:</span> ${rec} ${escapeHtml(a.transcript_text || '(音声のみ)')}
                 </div>`;
             });
         }
@@ -368,8 +386,8 @@ async function loadLogs() {
         tbody.innerHTML += `
             <tr>
                 <td>${new Date(call.started_at).toLocaleString('ja-JP')}</td>
-                <td>${call.from_number}</td>
-                <td>${call.to_number}</td>
+                <td>${escapeHtml(call.from_number)}</td>
+                <td>${escapeHtml(call.to_number)}</td>
                 <td style="font-size:0.85rem; color:#888;">${call.scenario_id || '-'}</td>
                 <td>${answersHtml}</td>
             </tr>`;
@@ -384,6 +402,7 @@ function exportCSV() {
 }
 
 function escapeHtml(text) {
+    if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
