@@ -157,6 +157,13 @@ textarea {
     align-items: flex-end;
 }
 
+.help-text {
+    font-size: 0.85rem;
+    color: #7f8c8d;
+    margin-top: 5px;
+    margin-bottom: 0;
+}
+
 /* List Styles */
 #scenario-list {
     list-style: none;
@@ -404,9 +411,37 @@ tbody tr:nth-child(even) {
     background: #fffbf0;
 }
 
-/* Light yellow for even rows */
 tbody tr:hover {
     background: #f0f8ff;
+}
+
+/* Download Links */
+.download-link {
+    color: #3498db;
+    margin-right: 8px;
+    text-decoration: none;
+    font-size: 1.1rem;
+}
+
+.download-link:hover {
+    color: #2980b9;
+}
+
+.btn-download-all {
+    display: inline-block;
+    background: #27ae60;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 4px;
+    text-decoration: none;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+}
+
+.btn-download-all:hover {
+    background: #229954;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(39, 174, 96, 0.3);
 }
 
 /* Utility */

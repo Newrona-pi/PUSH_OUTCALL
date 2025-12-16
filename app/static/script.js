@@ -82,7 +82,7 @@ async function selectScenario(scenarioId) {
     document.getElementById('scenario-name').value = scenario.name;
     document.getElementById('scenario-greeting').value = scenario.greeting_text || '';
     document.getElementById('scenario-disclaimer').value = scenario.disclaimer_text || '';
-    document.getElementById('scenario-guidance').value = scenario.question_guidance_text || '';
+    document.getElementById('scenario-guidance').value = scenario.question_guidance_text || 'このあと何点か質問をさせていただきます。回答が済みましたらシャープを押して次に進んでください';
 
     await loadQuestions(scenario.id);
 }
@@ -97,6 +97,7 @@ function showCreateScenarioForm() {
     document.getElementById('editor-title').textContent = "新規シナリオ作成";
     document.getElementById('scenario-id').value = "";
     document.getElementById('scenario-form').reset();
+    document.getElementById('scenario-guidance').value = 'このあと何点か質問をさせていただきます。回答が済みましたらシャープを押して次に進んでください';
     document.getElementById('questions-container').innerHTML = '';
 }
 
@@ -471,7 +472,7 @@ document.getElementById('number-form').onsubmit = async (e) => {
     showNotification('保存完了', `電話番号「${to}」を設定しました`);
 };
 
-// --- Logs ---
+// --- Logs with Download ---
 async function loadLogs() {
     const to = document.getElementById('filter-to').value;
     let url = `${API_BASE}/calls/?limit=50`;
@@ -486,14 +487,17 @@ async function loadLogs() {
         let answersHtml = '';
         if (call.answers) {
             call.answers.forEach(a => {
-                let rec = a.recording_url_twilio ? `<a href="${a.recording_url_twilio}" target="_blank"><i class="fas fa-play"></i></a>` : '';
-                let transcript = a.transcript_text ? escapeHtml(a.transcript_text) : '(テキスト化待ち)';
+                let downloadBtn = a.recording_sid ?
+                    `<a href="${API_BASE}/download_recording/${a.recording_sid}" class="download-link" title="ダウンロード"><i class="fas fa-download"></i></a>` : '';
+                let transcript = a.transcript_text ? escapeHtml(a.transcript_text) : '<span style="color:#999;">(テキスト化処理中...)</span>';
                 answersHtml += `<div style="font-size:0.9rem; margin-bottom:8px; padding:8px; background:#f9f9f9; border-radius:4px;">
                     <div style="color:#888; font-size:0.85rem; margin-bottom:4px;"><strong>Q:</strong> ${escapeHtml(a.question_text || '??')}</div>
-                    <div style="color:#2c3e50;"><strong>A:</strong> ${rec} ${transcript}</div>
+                    <div style="color:#2c3e50;"><strong>A:</strong> ${downloadBtn} ${transcript}</div>
                 </div>`;
             });
         }
+
+        const bulkDownload = `<a href="${API_BASE}/download_call_recordings/${call.call_sid}" class="btn-download-all" title="全録音をZIPでダウンロード"><i class="fas fa-file-archive"></i> 一括DL</a>`;
 
         tbody.innerHTML += `
             <tr>
@@ -501,7 +505,10 @@ async function loadLogs() {
                 <td>${escapeHtml(call.from_number)}</td>
                 <td>${escapeHtml(call.to_number)}</td>
                 <td style="font-weight:600; color:#3498db;">${escapeHtml(call.scenario_name || '-')}</td>
-                <td>${answersHtml || '<span style="color:#999;">回答なし</span>'}</td>
+                <td>
+                    ${answersHtml || '<span style="color:#999;">回答なし</span>'}
+                    <div style="margin-top:10px;">${bulkDownload}</div>
+                </td>
             </tr>`;
     });
 }

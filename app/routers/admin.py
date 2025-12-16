@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 import csv
 import io
+import os
+import requests
 from ..database import get_db
 from .. import models, schemas
 
@@ -11,6 +13,10 @@ router = APIRouter(
     prefix="/admin",
     tags=["admin"],
 )
+
+# Twilio credentials from environment
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 
 # --- Scenarios ---
 @router.post("/scenarios/", response_model=schemas.Scenario)
@@ -132,6 +138,60 @@ def delete_phone_number(to_number: str, db: Session = Depends(get_db)):
 @router.get("/phone_numbers/", response_model=List[schemas.PhoneNumber])
 def read_phone_numbers(db: Session = Depends(get_db)):
     return db.query(models.PhoneNumber).all()
+
+# --- Recording Download ---
+@router.get("/download_recording/{recording_sid}")
+def download_recording(recording_sid: str):
+    """Download a single recording from Twilio"""
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        raise HTTPException(status_code=500, detail="Twilio credentials not configured")
+    
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Recordings/{recording_sid}.mp3"
+    
+    response = requests.get(url, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN), stream=True)
+    
+    if response.status_code != 200:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    
+    return StreamingResponse(
+        io.BytesIO(response.content),
+        media_type="audio/mpeg",
+        headers={"Content-Disposition": f"attachment; filename={recording_sid}.mp3"}
+    )
+
+@router.get("/download_call_recordings/{call_sid}")
+def download_call_recordings(call_sid: str, db: Session = Depends(get_db)):
+    """Download all recordings for a call as a ZIP file"""
+    import zipfile
+    
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        raise HTTPException(status_code=500, detail="Twilio credentials not configured")
+    
+    # Get all answers for this call
+    answers = db.query(models.Answer).filter(models.Answer.call_sid == call_sid).all()
+    
+    if not answers:
+        raise HTTPException(status_code=404, detail="No recordings found for this call")
+    
+    # Create ZIP in memory
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for idx, answer in enumerate(answers, 1):
+            if answer.recording_sid:
+                url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Recordings/{answer.recording_sid}.mp3"
+                response = requests.get(url, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+                
+                if response.status_code == 200:
+                    filename = f"Q{idx}_{answer.recording_sid}.mp3"
+                    zip_file.writestr(filename, response.content)
+    
+    zip_buffer.seek(0)
+    
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=call_{call_sid}_recordings.zip"}
+    )
 
 # --- Logs & Stats ---
 @router.get("/calls/", response_model=List[schemas.CallLog])
