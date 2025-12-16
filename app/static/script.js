@@ -3,14 +3,22 @@ let currentScenario = null;
 let currentQuestions = [];
 
 // --- Notification System ---
-function showNotification(title, message) {
+function showNotification(title, items) {
+    // items can be a string or an array of strings
+    let itemsHtml = '';
+    if (Array.isArray(items)) {
+        itemsHtml = items.map(item => `<div style="margin: 5px 0;"><i class="fas fa-check" style="color:#27ae60; margin-right:8px;"></i>${item}</div>`).join('');
+    } else {
+        itemsHtml = `<p>${items}</p>`;
+    }
+
     const overlay = document.createElement('div');
     overlay.className = 'notification-overlay';
     overlay.innerHTML = `
         <div class="notification-modal">
             <div class="icon"><i class="fas fa-check-circle"></i></div>
             <h3>${title}</h3>
-            <p>${message}</p>
+            <div style="text-align: left; margin-top: 15px; color: #555;">${itemsHtml}</div>
         </div>
     `;
     document.body.appendChild(overlay);
@@ -18,7 +26,7 @@ function showNotification(title, message) {
     setTimeout(() => {
         overlay.style.opacity = '0';
         setTimeout(() => overlay.remove(), 200);
-    }, 1500);
+    }, 2500); // Longer display for multiple items
 }
 
 // --- Tab Switching ---
@@ -42,7 +50,7 @@ async function loadScenarios() {
 
     data.forEach(s => {
         const li = document.createElement('li');
-        li.dataset.scenarioId = s.id; // Store ID for precise matching
+        li.dataset.scenarioId = s.id;
         li.innerHTML = `
             <span onclick="selectScenario(${s.id})"><i class="fas fa-file-alt" style="margin-right:8px; color:#bbb;"></i>${escapeHtml(s.name)}</span>
             <button class="list-copy-btn" onclick="event.stopPropagation(); copyScenario(${s.id})">コピー</button>
@@ -59,7 +67,6 @@ async function selectScenario(scenarioId) {
     const scenario = await res.json();
     currentScenario = scenario;
 
-    // UI Update - Use dataset for precise matching
     document.querySelectorAll('#scenario-list li').forEach(l => {
         l.classList.remove('active');
         if (parseInt(l.dataset.scenarioId) === scenarioId) {
@@ -70,7 +77,6 @@ async function selectScenario(scenarioId) {
     document.getElementById('welcome-message').classList.add('hidden');
     document.getElementById('scenario-editor').classList.remove('hidden');
 
-    // Fill Form
     document.getElementById('editor-title').textContent = "シナリオ編集: " + scenario.name;
     document.getElementById('scenario-id').value = scenario.id;
     document.getElementById('scenario-name').value = scenario.name;
@@ -111,6 +117,7 @@ async function saveScenario() {
 
     let url = `${API_BASE}/scenarios/`;
     let method = 'POST';
+    let isNew = !id;
 
     if (id) {
         url += `${id}`;
@@ -132,17 +139,18 @@ async function saveScenario() {
         } else {
             currentScenario = saved;
         }
-        return saved;
+        return { scenario: saved, isNew: isNew };
     }
     return null;
 }
 
 document.getElementById('scenario-form').onsubmit = async (e) => {
     e.preventDefault();
-    const saved = await saveScenario();
-    if (saved) {
+    const result = await saveScenario();
+    if (result) {
         loadScenarios();
-        showNotification('保存完了', `シナリオ「${saved.name}」を保存しました`);
+        const items = [`シナリオ「${result.scenario.name}」を${result.isNew ? '作成' : '更新'}`];
+        showNotification('保存完了', items);
     }
 };
 
@@ -274,12 +282,27 @@ function resetQuestionForm() {
 document.getElementById('question-form').onsubmit = async (e) => {
     e.preventDefault();
 
+    const savedItems = [];
+    let scenarioSaved = false;
+
+    // Auto-save scenario if not saved yet or if there are changes
     if (!currentScenario || !document.getElementById('scenario-id').value) {
-        const saved = await saveScenario();
-        if (!saved) {
+        const result = await saveScenario();
+        if (!result) {
             alert('シナリオの保存に失敗しました');
             return;
         }
+        scenarioSaved = true;
+        savedItems.push(`シナリオ「${result.scenario.name}」を${result.isNew ? '作成' : '更新'}`);
+
+        // Check if greeting/disclaimer were filled
+        if (result.scenario.greeting_text) {
+            savedItems.push('挨拶メッセージを保存');
+        }
+        if (result.scenario.disclaimer_text) {
+            savedItems.push('免責事項を保存');
+        }
+
         loadScenarios();
     }
 
@@ -289,6 +312,8 @@ document.getElementById('question-form').onsubmit = async (e) => {
 
     let url = `${API_BASE}/questions/`;
     let method = 'POST';
+    let isNewQuestion = !qId;
+
     if (qId) {
         url += `${qId}`;
         method = 'PUT';
@@ -305,17 +330,20 @@ document.getElementById('question-form').onsubmit = async (e) => {
         })
     });
 
+    const questionPreview = text.length > 30 ? text.substring(0, 30) + '...' : text;
+    savedItems.push(`質問「${questionPreview}」を${isNewQuestion ? '作成' : '更新'}`);
+
     resetQuestionForm();
     await loadQuestions(currentScenario.id);
-    showNotification('保存完了', `質問「${text.substring(0, 20)}...」を保存しました`);
+
+    showNotification('保存完了', savedItems);
 };
 
 async function deleteQuestion(id) {
     if (!confirm('この質問を削除しますか？')) return;
-    const q = currentQuestions.find(q => q.id === id);
     await fetch(`${API_BASE}/questions/${id}`, { method: 'DELETE' });
     await loadQuestions(currentScenario.id);
-    showNotification('削除完了', `質問を削除しました`);
+    showNotification('削除完了', '質問を削除しました');
 }
 
 // --- Numbers & Logs ---
