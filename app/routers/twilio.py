@@ -4,11 +4,73 @@ from sqlalchemy.orm import Session
 from twilio.twiml.voice_response import VoiceResponse
 from ..database import get_db
 from .. import models
+import os
+import requests
+from openai import OpenAI
 
 router = APIRouter(
     prefix="/twilio",
     tags=["twilio"],
 )
+
+# Initialize OpenAI client
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+
+async def transcribe_with_whisper(answer_id: int, recording_url: str, recording_sid: str):
+    """Transcribe audio using OpenAI Whisper API"""
+    try:
+        if not OPENAI_API_KEY:
+            print("OpenAI API key not configured")
+            return
+        
+        # Download audio from Twilio
+        audio_url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Recordings/{recording_sid}.mp3"
+        audio_response = requests.get(audio_url, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+        
+        if audio_response.status_code != 200:
+            print(f"Failed to download recording: {recording_sid}")
+            return
+        
+        # Save temporarily
+        temp_file = f"/tmp/{recording_sid}.mp3"
+        with open(temp_file, 'wb') as f:
+            f.write(audio_response.content)
+        
+        # Transcribe with Whisper
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        with open(temp_file, 'rb') as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                language="ja"
+            )
+        
+        # Update database
+        from ..database import SessionLocal
+        db = SessionLocal()
+        answer = db.query(models.Answer).filter(models.Answer.id == answer_id).first()
+        if answer:
+            answer.transcript_text = transcript.text
+            answer.transcript_status = "completed"
+            db.commit()
+        db.close()
+        
+        # Clean up
+        os.remove(temp_file)
+        print(f"Transcription completed for {recording_sid}: {transcript.text}")
+        
+    except Exception as e:
+        print(f"Transcription error for {recording_sid}: {str(e)}")
+        # Update status to failed
+        from ..database import SessionLocal
+        db = SessionLocal()
+        answer = db.query(models.Answer).filter(models.Answer.id == answer_id).first()
+        if answer:
+            answer.transcript_status = "failed"
+            db.commit()
+        db.close()
 
 @router.post("/voice")
 async def handle_incoming_call(
@@ -79,14 +141,11 @@ async def handle_incoming_call(
     if first_question:
         vr.say(first_question.text, language="ja-JP")
         action_url = f"/twilio/record_callback?scenario_id={scenario.id}&q_curr={first_question.id}"
-        # Remove max_length, set timeout=0 to disable auto-end, enable transcription
+        # No transcription here - will use OpenAI Whisper instead
         vr.record(
             action=action_url, 
             finish_on_key="#",
-            timeout=0,  # Disable silence detection
-            transcribe=True,  # Enable transcription
-            transcribe_callback=f"/twilio/transcription_callback",
-            transcribe_language="ja-JP"  # Japanese transcription
+            timeout=0  # Disable silence detection
         )
     else:
         vr.say("質問が設定されていません。終了します。", language="ja-JP")
@@ -109,10 +168,16 @@ async def handle_recording(
         question_id=q_curr,
         answer_type="recording",
         recording_sid=RecordingSid,
-        recording_url_twilio=RecordingUrl
+        recording_url_twilio=RecordingUrl,
+        transcript_status="processing"
     )
     db.add(answer)
     db.commit()
+    db.refresh(answer)
+    
+    # 2. Transcribe with OpenAI Whisper (async)
+    import asyncio
+    asyncio.create_task(transcribe_with_whisper(answer.id, RecordingUrl, RecordingSid))
 
     vr = VoiceResponse()
 
@@ -136,10 +201,7 @@ async def handle_recording(
         vr.record(
             action=action_url, 
             finish_on_key="#",
-            timeout=0,
-            transcribe=True,
-            transcribe_callback=f"/twilio/transcription_callback",
-            transcribe_language="ja-JP"
+            timeout=0
         )
     else:
         # No more questions
