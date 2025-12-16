@@ -85,7 +85,8 @@ async def handle_incoming_call(
             finish_on_key="#",
             timeout=0,  # Disable silence detection
             transcribe=True,  # Enable transcription
-            transcribe_callback=f"/twilio/transcription_callback"
+            transcribe_callback=f"/twilio/transcription_callback",
+            transcribe_language="ja-JP"  # Japanese transcription
         )
     else:
         vr.say("質問が設定されていません。終了します。", language="ja-JP")
@@ -137,7 +138,8 @@ async def handle_recording(
             finish_on_key="#",
             timeout=0,
             transcribe=True,
-            transcribe_callback=f"/twilio/transcription_callback"
+            transcribe_callback=f"/twilio/transcription_callback",
+            transcribe_language="ja-JP"
         )
     else:
         # No more questions
