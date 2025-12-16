@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Twilio Scenario Admin</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>Twilio Scenario Admin</h1>
+        <nav>
+            <button class="tab-btn active" onclick="openTab('tab-scenarios')">Scenarios</button>
+            <button class="tab-btn" onclick="openTab('tab-numbers')">Phone Numbers</button>
+            <button class="tab-btn" onclick="openTab('tab-logs')">Call Logs</button>
+        </nav>
+    </header>
+
+    <main>
+        <!-- Tab 1: Scenarios -->
+        <section id="tab-scenarios" class="tab-content active">
+            <div class="panel">
+                <h2>Create/Edit Scenario</h2>
+                <form id="scenario-form">
+                    <input type="text" id="scenario-name" placeholder="Scenario Name (e.g. Campaign A)" required>
+                    <textarea id="scenario-greeting" placeholder="Greeting Message"></textarea>
+                    <textarea id="scenario-disclaimer" placeholder="Disclaimer/Recording Notice"></textarea>
+                    <button type="submit">save Scenario</button>
+                </form>
+            </div>
+            <div class="panel">
+                <h2>Existing Scenarios</h2>
+                <ul id="scenario-list"></ul>
+            </div>
+            
+            <div id="questions-section" class="panel hidden">
+                <h3>Questions for: <span id="current-scenario-name"></span></h3>
+                <form id="question-form">
+                    <input type="text" id="question-text" placeholder="Question Text" required>
+                    <input type="number" id="question-order" placeholder="Order" value="0" style="width: 60px;">
+                    <button type="submit">Add Question</button>
+                </form>
+                <ul id="question-list"></ul>
+            </div>
+        </section>
+
+        <!-- Tab 2: Phone Numbers -->
+        <section id="tab-numbers" class="tab-content">
+            <div class="panel">
+                <h2>Map Phone Number to Scenario</h2>
+                <form id="number-form">
+                    <input type="text" id="phone-number" placeholder="+81..." required>
+                    <select id="number-scenario-select" required>
+                        <option value="">Select Scenario</option>
+                    </select>
+                    <input type="text" id="phone-label" placeholder="Label (optional)">
+                    <button type="submit">Map Number</button>
+                </form>
+            </div>
+            <div class="panel">
+                <h2>Active Mappings</h2>
+                <table id="number-table">
+                    <thead>
+                        <tr>
+                            <th>Number</th>
+                            <th>Scenario</th>
+                            <th>Label</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Tab 3: Logs -->
+        <section id="tab-logs" class="tab-content">
+            <div class="panel controls">
+                <input type="text" id="filter-to" placeholder="Filter To">
+                <input type="text" id="filter-from" placeholder="Filter From">
+                <button onclick="loadLogs()">Search</button>
+                <button onclick="exportCSV()">Export CSV</button>
+            </div>
+            <div class="panel">
+                <table id="logs-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>From</th>
+                            <th>To</th>
+                            <th>Status</th>
+                            <th>Answers</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
