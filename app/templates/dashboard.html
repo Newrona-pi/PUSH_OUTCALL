@@ -46,7 +46,7 @@
                         <div class="header-actions">
                             <h2 id="editor-title">シナリオ編集</h2>
                             <div>
-                                <button type="button" class="secondary small" onclick="copyCurrentScenario()">
+                                <button type="button" class="copy-btn small" onclick="copyCurrentScenario()">
                                     <i class="fas fa-copy"></i> コピーして新規作成
                                 </button>
                                 <button type="button" class="danger small" onclick="deleteCurrentScenario()">
@@ -79,7 +79,7 @@
 
                         <hr style="margin: 2rem 0; border: 0; border-top: 1px solid #eee;">
 
-                        <!-- Questions Area -->
+                        <!-- Questions Area (Always visible now) -->
                         <div id="questions-area">
                             <h3>質問リスト <span class="description-inline">※この順序でAIが質問します</span></h3>
 
@@ -90,16 +90,17 @@
                             <div class="add-question-box">
                                 <h4><i class="fas fa-plus-circle"></i> 質問を追加</h4>
                                 <form id="question-form">
-                                    <input type="hidden" id="question-id"> <!-- For editing -->
+                                    <input type="hidden" id="question-id">
                                     <div class="form-group">
                                         <textarea id="question-text" placeholder="例：お名前をおっしゃってください。"
                                             required></textarea>
                                     </div>
-                                    <!-- Order is handled automatically or via drag/drop in future, simple number for now -->
                                     <div class="form-row">
-                                        <div class="form-group" style="width: 100px;">
+                                        <div class="form-group" style="width: 150px;">
                                             <label>順序</label>
-                                            <input type="number" id="question-order" value="10" title="小さい順に実行されます">
+                                            <select id="question-order" required>
+                                                <!-- Populated by JS -->
+                                            </select>
                                         </div>
                                         <div class="actions-right" style="flex:1; align-items: flex-end;">
                                             <button type="button" class="secondary"
@@ -115,7 +116,7 @@
             </div>
         </section>
 
-        <!-- Tab 2: Phone Numbers (Same as before but simplified structure) -->
+        <!-- Tab 2: Phone Numbers -->
         <section id="tab-numbers" class="tab-content">
             <div class="panel">
                 <h2>電話番号設定</h2>

@@ -1,6 +1,6 @@
 const API_BASE = "/admin";
 let currentScenario = null;
-let currentQuestionId = null; // For editing
+let currentQuestions = [];
 
 // --- Tab Switching ---
 function openTab(tabId) {
@@ -23,27 +23,27 @@ async function loadScenarios() {
 
     data.forEach(s => {
         const li = document.createElement('li');
-        li.innerHTML = `<span><i class="fas fa-file-alt" style="margin-right:8px; color:#bbb;"></i>${s.name}</span>`;
-        li.onclick = () => selectScenario(s, li);
-        list.appendChild(li);
-
-        // Keep selection active if refreshing
+        li.innerHTML = `
+            <span onclick="selectScenario(${s.id})"><i class="fas fa-file-alt" style="margin-right:8px; color:#bbb;"></i>${s.name}</span>
+            <button class="list-copy-btn" onclick="event.stopPropagation(); copyScenario(${s.id})">コピー</button>
+        `;
         if (currentScenario && currentScenario.id === s.id) {
             li.classList.add('active');
         }
+        list.appendChild(li);
     });
 }
 
-function selectScenario(scenario, liElement) {
+async function selectScenario(scenarioId) {
+    const res = await fetch(`${API_BASE}/scenarios/${scenarioId}`);
+    const scenario = await res.json();
     currentScenario = scenario;
 
     // UI Update
     document.querySelectorAll('#scenario-list li').forEach(l => l.classList.remove('active'));
-    if (liElement) liElement.classList.add('active');
-    else {
-        // Find by text if element not provided (e.g. after save)
-        // Omitted for simplicity
-    }
+    document.querySelectorAll('#scenario-list li').forEach(l => {
+        if (l.textContent.includes(scenario.name)) l.classList.add('active');
+    });
 
     document.getElementById('welcome-message').classList.add('hidden');
     document.getElementById('scenario-editor').classList.remove('hidden');
@@ -55,11 +55,13 @@ function selectScenario(scenario, liElement) {
     document.getElementById('scenario-greeting').value = scenario.greeting_text || '';
     document.getElementById('scenario-disclaimer').value = scenario.disclaimer_text || '';
 
-    loadQuestions(scenario.id);
+    await loadQuestions(scenario.id);
+    populateOrderSelect();
 }
 
 function showCreateScenarioForm() {
     currentScenario = null;
+    currentQuestions = [];
     document.querySelectorAll('#scenario-list li').forEach(l => l.classList.remove('active'));
     document.getElementById('welcome-message').classList.add('hidden');
     document.getElementById('scenario-editor').classList.remove('hidden');
@@ -67,7 +69,8 @@ function showCreateScenarioForm() {
     document.getElementById('editor-title').textContent = "新規シナリオ作成";
     document.getElementById('scenario-id').value = "";
     document.getElementById('scenario-form').reset();
-    document.getElementById('questions-area').classList.add('hidden'); // Hide questions until saved
+    document.getElementById('questions-container').innerHTML = '';
+    populateOrderSelect();
 }
 
 // --- Scenario Actions ---
@@ -80,26 +83,11 @@ document.getElementById('scenario-form').onsubmit = async (e) => {
 
     const payload = { name, greeting_text: greeting, disclaimer_text: disclaimer };
 
-    // Currently API only supports create (POST) or we need Update endpoint
-    // Assuming backend logic: if ID exists, we should update, but current API only has POST /scenarios (Create) and GET.
-    // **TODO**: For "Update", we normally need PUT /scenarios/{id}.
-    // Since user didn't request backend change, I will use POST for now (creates NEW if ID empty, but how to update?).
-    // Wait, the Requirement was "UI change". I should assume Update logic exists or I should add it.
-    // I will add a backend check or just use POST as Create for now and handle "Update" by overwrite if I can.
-    // Actually, let's just make a new one if ID is missing. if ID exists, we prefer UPDATE. 
-    // I will implement a quick PUT in admin.py for better UX, or just CREATE NEW if simple.
-    // User asked for "Edit", so I MUST implement UPDATE.
-
     let url = `${API_BASE}/scenarios/`;
     let method = 'POST';
 
-    // Note: I will need to check if I can modify backend. User said "UI change".
-    // I will use POST for everything for now, but to support real editing I should add backend logic.
-    // I will assume for now I can only Create, but I'll add a PUT endpoint in the next file write if needed.
-    // For this JS, I will differentiate.
-
     if (id) {
-        url += `${id}`; // We need to add this route to backend!
+        url += `${id}`;
         method = 'PUT';
     }
 
@@ -111,47 +99,43 @@ document.getElementById('scenario-form').onsubmit = async (e) => {
 
     if (res.ok) {
         const saved = await res.json();
+        if (!id) {
+            // New creation - set current scenario
+            currentScenario = saved;
+            document.getElementById('scenario-id').value = saved.id;
+            document.getElementById('editor-title').textContent = "シナリオ編集: " + saved.name;
+        }
         loadScenarios();
-        // Reselect
-        setTimeout(() => {
-            // Fake select or reload
-            // If created new, we want to enable questions
-            if (!id) {
-                // New creation
-                currentScenario = saved;
-                document.getElementById('scenario-id').value = saved.id;
-                document.getElementById('questions-area').classList.remove('hidden');
-                loadQuestions(saved.id);
-                document.getElementById('editor-title').textContent = "シナリオ編集: " + saved.name;
-                // Highight list item... skipped for brevity
-            }
-        }, 500);
         alert('保存しました');
     }
 };
 
 async function copyCurrentScenario() {
     if (!currentScenario) return;
-    const name = currentScenario.name + " (コピー)";
+    await copyScenario(currentScenario.id);
+}
+
+async function copyScenario(scenarioId) {
+    const res = await fetch(`${API_BASE}/scenarios/${scenarioId}`);
+    const scenario = await res.json();
+    const name = scenario.name + " (コピー)";
 
     // Create Scenario
-    let res = await fetch(`${API_BASE}/scenarios/`, {
+    let createRes = await fetch(`${API_BASE}/scenarios/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             name: name,
-            greeting_text: currentScenario.greeting_text,
-            disclaimer_text: currentScenario.disclaimer_text
+            greeting_text: scenario.greeting_text,
+            disclaimer_text: scenario.disclaimer_text
         })
     });
-    const newScenario = await res.json();
+    const newScenario = await createRes.json();
 
     // Copy Questions
-    // 1. Get current questions
-    const qRes = await fetch(`${API_BASE}/scenarios/${currentScenario.id}/questions`);
+    const qRes = await fetch(`${API_BASE}/scenarios/${scenarioId}/questions`);
     const questions = await qRes.json();
 
-    // 2. Insert to new
     for (const q of questions) {
         await fetch(`${API_BASE}/questions/`, {
             method: 'POST',
@@ -170,7 +154,6 @@ async function copyCurrentScenario() {
 
 async function deleteCurrentScenario() {
     if (!confirm("本当に削除しますか？")) return;
-    // Backend DELETE endpoint needed.
     await fetch(`${API_BASE}/scenarios/${currentScenario.id}`, { method: 'DELETE' });
     loadScenarios();
     showCreateScenarioForm();
@@ -179,25 +162,59 @@ async function deleteCurrentScenario() {
 // --- Questions ---
 async function loadQuestions(scenarioId) {
     const res = await fetch(`${API_BASE}/scenarios/${scenarioId}/questions`);
-    const data = await res.json();
+    currentQuestions = await res.json();
+    renderQuestions();
+}
+
+function renderQuestions() {
     const container = document.getElementById('questions-container');
     container.innerHTML = '';
 
-    data.forEach(q => {
+    currentQuestions.forEach(q => {
         const div = document.createElement('div');
         div.className = 'question-item';
         div.innerHTML = `
             <div>
                 <span class="q-order">#${q.sort_order}</span>
-                <span class="q-text">${q.text}</span>
+                <span class="q-text">${escapeHtml(q.text)}</span>
             </div>
             <div class="q-actions">
-                <button class="small secondary" onclick="editQuestion(${q.id}, '${q.text}', ${q.sort_order})">編集</button>
+                <button class="small secondary" onclick="editQuestion(${q.id}, \`${escapeHtml(q.text)}\`, ${q.sort_order})">編集</button>
                 <button class="small danger" onclick="deleteQuestion(${q.id})">削除</button>
             </div>
         `;
         container.appendChild(div);
     });
+
+    populateOrderSelect();
+}
+
+function populateOrderSelect() {
+    const select = document.getElementById('question-order');
+    const usedOrders = currentQuestions.map(q => q.sort_order);
+
+    select.innerHTML = '';
+    for (let i = 1; i <= 50; i++) {
+        if (!usedOrders.includes(i)) {
+            const opt = document.createElement('option');
+            opt.value = i;
+            opt.textContent = i;
+            select.appendChild(opt);
+        }
+    }
+
+    // If editing, add current value
+    const currentEditId = document.getElementById('question-id').value;
+    if (currentEditId) {
+        const editingQ = currentQuestions.find(q => q.id == currentEditId);
+        if (editingQ && !usedOrders.includes(editingQ.sort_order)) {
+            const opt = document.createElement('option');
+            opt.value = editingQ.sort_order;
+            opt.textContent = editingQ.sort_order;
+            opt.selected = true;
+            select.appendChild(opt);
+        }
+    }
 }
 
 function editQuestion(id, text, order) {
@@ -205,17 +222,23 @@ function editQuestion(id, text, order) {
     document.getElementById('question-text').value = text;
     document.getElementById('question-order').value = order;
     document.querySelector('.add-question-box h4').textContent = "質問を編集";
+    populateOrderSelect();
 }
 
 function resetQuestionForm() {
     document.getElementById('question-id').value = '';
     document.getElementById('question-form').reset();
     document.querySelector('.add-question-box h4').textContent = "質問を追加";
+    populateOrderSelect();
 }
 
 document.getElementById('question-form').onsubmit = async (e) => {
     e.preventDefault();
-    if (!currentScenario) return;
+    if (!currentScenario) {
+        alert('先にシナリオを保存してください');
+        return;
+    }
+
     const qId = document.getElementById('question-id').value;
     const text = document.getElementById('question-text').value;
     const order = document.getElementById('question-order').value;
@@ -223,7 +246,6 @@ document.getElementById('question-form').onsubmit = async (e) => {
     let url = `${API_BASE}/questions/`;
     let method = 'POST';
     if (qId) {
-        // Need PUT endpoint
         url += `${qId}`;
         method = 'PUT';
     }
@@ -233,22 +255,24 @@ document.getElementById('question-form').onsubmit = async (e) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             text: text,
-            sort_order: order,
-            scenario_id: currentScenario.id
+            sort_order: parseInt(order),
+            scenario_id: currentScenario.id,
+            is_active: true
         })
     });
 
     resetQuestionForm();
-    loadQuestions(currentScenario.id);
+    await loadQuestions(currentScenario.id);
 };
 
-// --- TODO: Need to add PUT/DELETE support to admin.py for this to work fully ---
+async function deleteQuestion(id) {
+    if (!confirm('この質問を削除しますか？')) return;
+    await fetch(`${API_BASE}/questions/${id}`, { method: 'DELETE' });
+    await loadQuestions(currentScenario.id);
+}
 
-// --- Numbers & Logs (Simplified) ---
-// ... (Keeping existing logic roughly same but hooking into new UI)
-
+// --- Numbers & Logs ---
 async function loadPhoneNumbers() {
-    // Populate select
     const sRes = await fetch(`${API_BASE}/scenarios/`);
     const scenarios = await sRes.json();
     const select = document.getElementById('number-scenario-select');
@@ -262,7 +286,6 @@ async function loadPhoneNumbers() {
     const tbody = document.querySelector('#number-table tbody');
     tbody.innerHTML = '';
     data.forEach(p => {
-        // Find scenario name
         const sc = scenarios.find(s => s.id === p.scenario_id);
         const scName = sc ? sc.name : `ID: ${p.scenario_id}`;
 
@@ -271,7 +294,7 @@ async function loadPhoneNumbers() {
                 <td>${p.to_number}</td>
                 <td>${scName}</td>
                 <td>${p.label || '-'}</td>
-                <td><button class="small secondary">解除/編集</button></td>
+                <td><button class="small secondary">編集</button></td>
             </tr>`;
     });
 }
@@ -285,7 +308,7 @@ document.getElementById('number-form').onsubmit = async (e) => {
     await fetch(`${API_BASE}/phone_numbers/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to_number: to, scenario_id: sid, label: label, is_active: true })
+        body: JSON.stringify({ to_number: to, scenario_id: parseInt(sid), label: label, is_active: true })
     });
     loadPhoneNumbers();
     alert('保存しました');
@@ -324,10 +347,18 @@ async function loadLogs() {
     });
 }
 
-// Init
-window.onclick = function (event) {
-    if (!event.target.matches('.dropbtn')) {
-        // Close dropdowns if any
-    }
+function exportCSV() {
+    const to = document.getElementById('filter-to').value;
+    let url = `${API_BASE}/export_csv`;
+    if (to) url += `?to_number=${encodeURIComponent(to)}`;
+    window.location.href = url;
 }
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Init
 loadScenarios();

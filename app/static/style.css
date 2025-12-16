@@ -82,6 +82,7 @@ button {
     border: none;
     padding: 8px 16px;
     font-weight: 500;
+    transition: all 0.2s;
 }
 
 .primary,
@@ -108,6 +109,19 @@ button[type="submit"]:hover {
 .danger {
     background: #e74c3c;
     color: white;
+}
+
+.danger:hover {
+    background: #c0392b;
+}
+
+.copy-btn {
+    background: #27ae60;
+    color: white;
+}
+
+.copy-btn:hover {
+    background: #229954;
 }
 
 .small {
@@ -140,6 +154,7 @@ textarea {
 .form-row {
     display: flex;
     gap: 15px;
+    align-items: flex-end;
 }
 
 /* List Styles */
@@ -166,6 +181,25 @@ textarea {
     background: #eef7fd;
     border-left: 4px solid #3498db;
     font-weight: bold;
+}
+
+#scenario-list .list-copy-btn {
+    background: #27ae60;
+    color: white;
+    border: 1px solid #27ae60;
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    border-radius: 3px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+#scenario-list li:hover .list-copy-btn {
+    opacity: 1;
+}
+
+#scenario-list .list-copy-btn:hover {
+    background: #229954;
 }
 
 /* Typography */
@@ -214,7 +248,7 @@ h3 {
     border: 1px solid #eee;
     padding: 15px;
     margin-bottom: 10px;
-    borderRadius: 4px;
+    border-radius: 4px;
     position: relative;
 }
 
@@ -268,6 +302,9 @@ h3 {
 
 .actions-right {
     text-align: right;
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
 }
 
 table {
@@ -284,4 +321,16 @@ td {
 
 th {
     background: #f4f4f4;
+}
+
+.create-btn {
+    width: 100%;
+    margin-bottom: 15px;
+    background: #3498db;
+    color: white;
+    padding: 10px;
+}
+
+.create-btn:hover {
+    background: #2980b9;
 }
