@@ -266,10 +266,27 @@ async function loadQuestions(scenarioId) {
     renderQuestions();
 }
 
+// Add Enter key support outside loadQuestions, or in init
+document.addEventListener('DOMContentLoaded', function () {
+    const input = document.getElementById('new-question-text');
+    if (input) {
+        input.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                addQuestionToList();
+            }
+        });
+    }
+});
+
 function addQuestionToList() {
+    console.log("Adding question to list...");
     const textInput = document.getElementById('new-question-text');
     const text = textInput.value.trim();
-    if (!text) return;
+    if (!text) {
+        console.log("Empty text, skipping");
+        return;
+    }
 
     currentQuestions.push({
         id: null, // No ID yet
@@ -281,6 +298,7 @@ function addQuestionToList() {
     renderQuestions();
     textInput.value = '';
     textInput.focus();
+    console.log("Question added:", text);
 }
 
 function renderQuestions() {
