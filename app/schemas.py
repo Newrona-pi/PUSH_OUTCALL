@@ -24,7 +24,15 @@ class ScenarioBase(BaseModel):
     greeting_text: str
     disclaimer_text: Optional[str] = None
     question_guidance_text: Optional[str] = None
+    conversation_mode: str = "A"
+    start_time: str = "10:00"
+    end_time: str = "18:00"
     is_active: bool = True
+    is_hard_stopped: bool = False
+    silence_timeout_short: int = 15
+    silence_timeout_long: int = 60
+    bridge_number: Optional[str] = None
+    sms_template: Optional[str] = None
 
 class ScenarioCreate(ScenarioBase):
     pass
@@ -53,6 +61,35 @@ class Question(QuestionBase):
     scenario_id: int
     created_at: datetime
     updated_at: datetime
+
+    class Config:
+        orm_mode = True
+
+# --- CallTarget Schemas ---
+class CallTargetBase(BaseModel):
+    phone_number: str
+    scenario_id: int
+    metadata_json: Optional[str] = None
+
+class CallTargetCreate(CallTargetBase):
+    pass
+
+class CallTarget(CallTargetBase):
+    id: int
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True
+
+# --- Blacklist Schemas ---
+class BlacklistBase(BaseModel):
+    phone_number: str
+    reason: Optional[str] = None
+
+class Blacklist(BlacklistBase):
+    created_at: datetime
 
     class Config:
         orm_mode = True
@@ -102,6 +139,11 @@ class CallLog(BaseModel):
     scenario_id: Optional[int]
     scenario_name: Optional[str] = None
     status: str
+    direction: str
+    classification: Optional[str] = None
+    bridge_executed: bool = False
+    sms_sent_log: bool = False
+    transcript_full: Optional[str] = None
     recording_sid: Optional[str]
     started_at: datetime
     answers: List[AnswerLog] = []
@@ -109,3 +151,4 @@ class CallLog(BaseModel):
 
     class Config:
         orm_mode = True
+

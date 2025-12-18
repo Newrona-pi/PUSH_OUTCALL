@@ -12,11 +12,12 @@
 
 <body>
     <header>
-        <h1>Twilio シナリオ管理システム</h1>
+        <h1>Twilio オートコール管理システム</h1>
         <nav>
             <button class="tab-btn active" onclick="openTab('tab-scenarios')">シナリオ設定</button>
-            <button class="tab-btn" onclick="openTab('tab-numbers')">電話番号設定</button>
+            <button class="tab-btn" onclick="openTab('tab-outbound')">発信リスト・開始</button>
             <button class="tab-btn" onclick="openTab('tab-logs')">通話ログ・集計</button>
+            <button class="tab-btn" onclick="openTab('tab-blacklist')">ブラックリスト</button>
         </nav>
     </header>
 
@@ -45,9 +46,13 @@
                     <div id="scenario-editor" class="hidden">
                         <div class="header-actions">
                             <h2 id="editor-title">シナリオ編集</h2>
+                            <div class="stop-controls">
+                                <button type="button" class="warning small" onclick="stopScenario('soft')">ソフト停止</button>
+                                <button type="button" class="danger small" onclick="stopScenario('hard')">ハード停止</button>
+                            </div>
                             <div>
                                 <button type="button" class="copy-btn small" onclick="copyCurrentScenario()">
-                                    <i class="fas fa-copy"></i> コピーして新規作成
+                                    <i class="fas fa-copy"></i> コピー
                                 </button>
                                 <button type="button" class="danger small" onclick="deleteCurrentScenario()">
                                     <i class="fas fa-trash"></i> 削除
@@ -57,73 +62,86 @@
 
                         <form id="scenario-form">
                             <input type="hidden" id="scenario-id">
-                            <div class="form-group">
-                                <label>シナリオ名 <span class="badge">管理用</span></label>
-                                <input type="text" id="scenario-name" placeholder="例：キャンペーンA用" required>
+                            
+                            <div class="form-row">
+                                <div class="form-group flex-2">
+                                    <label>シナリオ名</label>
+                                    <input type="text" id="scenario-name" placeholder="例：キャンペーンA用" required>
+                                </div>
+                                <div class="form-group flex-1">
+                                    <label>会話モード</label>
+                                    <select id="scenario-mode">
+                                        <option value="A">A: 質問順守 (推奨)</option>
+                                        <option value="B">B: 自由対話</option>
+                                        <option value="C">C: ハイブリッド</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>開始時間</label>
+                                    <input type="time" id="scenario-start-time" value="10:00">
+                                </div>
+                                <div class="form-group">
+                                    <label>終了時間</label>
+                                    <input type="time" id="scenario-end-time" value="18:00">
+                                </div>
+                                <div class="form-group">
+                                    <label>無言(警告)</label>
+                                    <input type="number" id="scenario-timeout-short" value="15" style="width: 60px;"> 秒
+                                </div>
+                                <div class="form-group">
+                                    <label>無言(切断)</label>
+                                    <input type="number" id="scenario-timeout-long" value="60" style="width: 60px;"> 秒
+                                </div>
                             </div>
 
                             <div class="form-group">
-                                <label>挨拶メッセージ <span class="badge">AI発話</span></label>
-                                <textarea id="scenario-greeting" placeholder="電話に出た直後に話す内容"></textarea>
+                                <label>挨拶メッセージ</label>
+                                <textarea id="scenario-greeting" placeholder="最初の一言"></textarea>
                             </div>
 
                             <div class="form-group">
-                                <label>免責事項・録音告知 <span class="badge">AI発話</span></label>
-                                <textarea id="scenario-disclaimer" placeholder="挨拶の後に続く補足メッセージ"></textarea>
+                                <label>免責事項・録音告知</label>
+                                <textarea id="scenario-disclaimer"></textarea>
                             </div>
 
                             <div class="form-group">
-                                <label>質問開始前のガイダンス <span class="badge">AI発話</span></label>
-                                <textarea
-                                    id="scenario-guidance">このあと何点か質問をさせていただきます。回答が済みましたらシャープを押して次に進んでください</textarea>
-                                <p class="help-text">※質問リストの前に読み上げられます。その後、1.5秒経過後に最初の質問が始まります。</p>
+                                <label>質問開始ガイダンス</label>
+                                <textarea id="scenario-guidance"></textarea>
                             </div>
 
                             <!-- Questions Area -->
                             <div id="questions-area">
-                                <h3>質問リスト <span class="description-inline">※ドラッグで並び替え可能</span></h3>
-
-                                <div id="questions-container">
-                                    <!-- JS renders questions here with drag & drop -->
-                                </div>
-
+                                <h3>質問リスト</h3>
+                                <div id="questions-container"></div>
                                 <div class="add-question-box">
-                                    <h4><i class="fas fa-plus-circle"></i> 質問を追加</h4>
-                                    <!-- New UI for adding questions locally first -->
-                                    <div class="form-row" style="align-items: flex-start;">
-                                        <div style="flex: 1;">
-                                            <textarea id="new-question-text" placeholder="質問文を入力してください"
-                                                style="min-height: 60px;"></textarea>
-                                        </div>
-                                        <button type="button" class="secondary small" onclick="addQuestionToList()"
-                                            style="margin-top: 4px;">
-                                            <i class="fas fa-arrow-up"></i> リストに追加
-                                        </button>
-                                    </div>
-                                    <p class="help-text">※「リストに追加」ボタンで上のリストに追加します。</p>
+                                    <textarea id="new-question-text" placeholder="質問文"></textarea>
+                                    <button type="button" onclick="addQuestionToList()">追加</button>
                                 </div>
                             </div>
 
-                            <!-- Ending Guidance Area (New) -->
-                            <div id="ending-area"
-                                style="margin-top: 30px; padding-top: 20px; border-top: 1px dashed #ddd;">
-                                <h3>終話ガイダンス <span class="description-inline">※質問終了後に流すメッセージ（複数可）</span></h3>
-                                <div id="ending-container">
-                                    <!-- JS renders ending guidances here -->
-                                </div>
-                                <div style="margin-top: 10px;">
-                                    <button type="button" class="secondary small" onclick="addEndingGuidance()">
-                                        <i class="fas fa-plus"></i> 終話ガイダンスを追加
-                                    </button>
-                                </div>
-                                <p class="help-text">※0件の場合は既定の終了メッセージが流れます。最後に必ず「失礼いたします」が流れて切断されます。</p>
+                            <!-- Ending Guidance -->
+                            <div id="ending-area">
+                                <h3>終話ガイダンス</h3>
+                                <div id="ending-container"></div>
+                                <button type="button" onclick="addEndingGuidance()">追加</button>
                             </div>
 
-                            <div class="actions-right"
-                                style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px;">
-                                <button type="submit" class="primary" style="font-size: 1.1rem; padding: 10px 30px;">
-                                    <i class="fas fa-save"></i> すべて保存する
-                                </button>
+                            <div class="form-row" style="margin-top: 20px; background: #f9f9f9; padding: 15px; border-radius: 8px;">
+                                <div class="form-group flex-1">
+                                    <label>担当者番号 (ブリッジ先)</label>
+                                    <input type="text" id="scenario-bridge" placeholder="+8190...">
+                                </div>
+                                <div class="form-group flex-1">
+                                    <label>SMSテンプレート</label>
+                                    <textarea id="scenario-sms" style="min-height: 50px;"></textarea>
+                                </div>
+                            </div>
+
+                            <div class="actions-right">
+                                <button type="submit" class="primary">保存する</button>
                             </div>
                         </form>
                     </div>
@@ -131,99 +149,71 @@
             </div>
         </section>
 
-        <!-- Tab 2: Phone Numbers -->
-        <section id="tab-numbers" class="tab-content">
+        <!-- Tab 2: Outbound -->
+        <section id="tab-outbound" class="tab-content">
             <div class="panel">
-                <h2>電話番号設定</h2>
-                <div class="split-view-simple">
-                    <div style="flex: 1; padding-right: 2rem; border-right: 1px solid #eee;">
-                        <h3>新規紐付け</h3>
-                        <form id="number-form">
-                            <div class="form-group">
-                                <label>電話番号</label>
-                                <input type="text" id="phone-number" placeholder="+81..." required>
-                            </div>
-                            <div class="form-group">
-                                <label>シナリオ</label>
-                                <select id="number-scenario-select" required>
-                                    <option>ロード中...</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>備考</label>
-                                <input type="text" id="phone-label" placeholder="〇〇店 代表電話">
-                            </div>
-                            <button type="submit">保存</button>
-                        </form>
-                    </div>
-                    <div style="flex: 2; padding-left: 2rem;">
-                        <h3>設定済み番号一覧</h3>
-                        <table id="number-table">
-                            <thead>
-                                <tr>
-                                    <th>番号</th>
-                                    <th>シナリオ</th>
-                                    <th>備考</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
+                <h2>発信リスト・実行</h2>
+                <div class="actions-bar">
+                    <select id="outbound-scenario-select">
+                        <option value="">シナリオを選択</option>
+                    </select>
+                    <input type="file" id="target-csv" accept=".csv" style="display:none" onchange="handleFileUpload(this)">
+                    <button class="secondary" onclick="document.getElementById('target-csv').click()">CSVアップロード</button>
+                    <button class="primary" onclick="startCalls()">架電開始 (10件ずつ)</button>
                 </div>
+                <table id="targets-table">
+                    <thead>
+                        <tr>
+                            <th>電話番号</th>
+                            <th>ステータス</th>
+                            <th>アップロード日時</th>
+                            <th>備考</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
             </div>
         </section>
 
         <!-- Tab 3: Logs -->
         <section id="tab-logs" class="tab-content">
             <div class="panel">
-                <div class="header-actions" style="flex-direction: column; align-items: flex-start;">
-                    <h2>通話ログ・集計</h2>
-
-                    <!-- Scenario Tabs for Logs -->
-                    <div class="log-scenario-tabs" style="display: flex; gap: 0; margin-bottom: 15px; width: 100%;">
-                        <button class="log-tab-btn active" onclick="switchLogTab('active')" id="log-tab-active"
-                            style="padding: 10px 20px; border: 1px solid #ddd; background: #fff; cursor: pointer; border-right: none; font-weight: bold; border-radius: 4px 0 0 4px;">有効なシナリオ</button>
-                        <button class="log-tab-btn" onclick="switchLogTab('deleted')" id="log-tab-deleted"
-                            style="padding: 10px 20px; border: 1px solid #ddd; background: #f9f9f9; color: #666; cursor: pointer; border-radius: 0 4px 4px 0;">削除済シナリオ
-                            (アーカイブ)</button>
-                    </div>
-
-                    <!-- Scenario Name Tabs (New Filter) -->
-                    <div id="log-scenario-name-tabs"
-                        style="display: flex; gap: 8px; margin-bottom: 15px; overflow-x: auto; padding-bottom: 10px; width: 100%;">
-                        <!-- JS renders scenario name tabs here -->
-                    </div>
-
-                    <div class="actions filter-bar"
-                        style="width: 100%; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 5px;">
-                        <input type="text" id="filter-to" placeholder="To番号で検索" class="search-input">
-
-                        <div class="date-range">
-                            <label>期間:</label>
-                            <input type="date" id="filter-start-date">
-                            <span>~</span>
-                            <input type="date" id="filter-end-date">
-                        </div>
-
-                        <button onclick="loadLogs()"><i class="fas fa-search"></i> 検索</button>
-
-                        <div style="flex: 1;"></div> <!-- Spacer -->
-
-                        <div class="export-actions" style="display: flex; gap: 10px;">
-                            <button onclick="exportZIP()" class="secondary"><i class="fas fa-file-archive"></i>
-                                ZIP一括DL (attendme)</button>
-                        </div>
-                    </div>
+                <h2>通話ログ</h2>
+                <div class="filter-bar">
+                    <input type="text" id="filter-phone" placeholder="電話番号で検索">
+                    <button onclick="loadLogs()">更新</button>
+                    <button onclick="exportZIP()">ZIP一括DL</button>
                 </div>
                 <table id="logs-table">
                     <thead>
                         <tr>
                             <th>日時</th>
-                            <th>From</th>
-                            <th>To</th>
-                            <th>シナリオ</th>
-                            <th>回答データ / 音声一括DL</th>
+                            <th>方向</th>
+                            <th>電話番号</th>
+                            <th>ステータス</th>
+                            <th>分類</th>
+                            <th>録音/文字起こし</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Tab 4: Blacklist -->
+        <section id="tab-blacklist" class="tab-content">
+            <div class="panel">
+                <h2>ブラックリスト (オプトアウト)</h2>
+                <div class="actions-bar">
+                    <input type="text" id="blacklist-phone" placeholder="+81...">
+                    <button onclick="addToBlacklist()">追加</button>
+                </div>
+                <table id="blacklist-table">
+                    <thead>
+                        <tr>
+                            <th>電話番号</th>
+                            <th>登録日</th>
+                            <th>理由</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -233,6 +223,7 @@
     </main>
 
     <script src="/static/script.js?v={{ now_timestamp }}"></script>
+
 </body>
 
 </html>

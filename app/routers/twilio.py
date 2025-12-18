@@ -208,45 +208,56 @@ async def handle_incoming_call(
     CallSid: str = Form(...),
     db: Session = Depends(get_db)
 ):
+    # This is for incoming calls to Twilio numbers
+    # We will use the same logic as outbound for consistency
+    return await handle_call_logic(To, From, CallSid, "inbound", db)
+
+@router.post("/outbound_handler")
+async def handle_outbound_call(
+    request: Request,
+    To: str = Form(...),
+    From: str = Form(...),
+    CallSid: str = Form(...),
+    scenario_id: int = Query(...),
+    db: Session = Depends(get_db)
+):
+    # This is called when an outbound call is answered
+    return await handle_call_logic(To, From, CallSid, "outbound", db, scenario_id)
+
+async def handle_call_logic(To: str, From: str, CallSid: str, direction: str, db: Session, scenario_id: int = None):
     from twilio.rest import Client
     
-    # Normalize phone number
-    def normalize_phone(number):
-        normalized = number.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
-        if not normalized.startswith('+'):
-            normalized = '+' + normalized
-        return normalized
-    
-    to_normalized = normalize_phone(To)
-    
     # 1. Lookup Scenario
-    phone_entry = db.query(models.PhoneNumber).filter(models.PhoneNumber.to_number == To).first()
-    if not phone_entry:
-        all_numbers = db.query(models.PhoneNumber).all()
-        for pn in all_numbers:
-            if normalize_phone(pn.to_number) == to_normalized:
-                phone_entry = pn
-                break
-    
-    # Create Call record (initial)
+    if scenario_id:
+        scenario = db.query(models.Scenario).get(scenario_id)
+    else:
+        # Incoming logic
+        phone_entry = db.query(models.PhoneNumber).filter(models.PhoneNumber.to_number == To).first()
+        scenario = phone_entry.scenario if phone_entry else None
+
+    # Check Blacklist
+    is_blacklisted = db.query(models.Blacklist).filter(models.Blacklist.phone_number == To if direction=="outbound" else From).first()
+    if is_blacklisted:
+        vr = VoiceResponse()
+        vr.hangup()
+        return Response(content=str(vr), media_type="application/xml")
+
+    # Create Call record
     call = models.Call(
         call_sid=CallSid,
         from_number=From,
         to_number=To,
         status="in-progress",
-        scenario_id=phone_entry.scenario_id if phone_entry else None
+        direction=direction,
+        scenario_id=scenario.id if scenario else None
     )
     
-    # 2. Start Full Call Recording
-    recording_sid = None
+    # Start Full Call Recording
     if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
         try:
             client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-            # Create a recording for the call (in-progress)
-            # Twilio API: POST /2010-04-01/Accounts/{AccountSid}/Calls/{CallSid}/Recordings.json
             rec = client.calls(CallSid).recordings.create()
-            recording_sid = rec.sid
-            call.recording_sid = recording_sid
+            call.recording_sid = rec.sid
         except Exception as e:
             print(f"Failed to start full call recording: {e}")
 
@@ -255,205 +266,47 @@ async def handle_incoming_call(
 
     vr = VoiceResponse()
 
-    if not phone_entry or not phone_entry.scenario.is_active:
+    if not scenario or not scenario.is_active or (scenario.is_hard_stopped):
         vr.say("現在この番号は使われておりません。", language="ja-JP")
         return Response(content=str(vr), media_type="application/xml")
 
-    scenario = phone_entry.scenario
-
-    # 3. Greeting
-    if scenario.greeting_text:
-        vr.say(scenario.greeting_text, language="ja-JP")
-    
-    if scenario.disclaimer_text:
-        vr.say(scenario.disclaimer_text, language="ja-JP")
-
-    # 4. Question Guidance
-    guidance_text = scenario.question_guidance_text or "このあと何点か質問をさせていただきます。回答が済みましたらシャープを押して次に進んでください"
-    vr.say(guidance_text, language="ja-JP")
-    vr.pause(length=1.5)
-
-    # 5. Ask First Question
-    first_question = db.query(models.Question).filter(
-        models.Question.scenario_id == scenario.id,
-        models.Question.is_active == True
-    ).order_by(models.Question.sort_order).first()
-
-    if first_question:
-        vr.say(first_question.text, language="ja-JP")
-        action_url = f"/twilio/record_callback?scenario_id={scenario.id}&q_curr={first_question.id}"
-        vr.record(
-            action=action_url, 
-            finish_on_key="#",
-            timeout=0,
-            max_length=180 # 3 minutes
-        )
-    else:
-        # Check for Ending Guidance if no questions?
-        ending_guidances = db.query(models.EndingGuidance).filter(
-            models.EndingGuidance.scenario_id == scenario.id
-        ).order_by(models.EndingGuidance.sort_order).all()
-        
-        if ending_guidances:
-             for eg in ending_guidances:
-                 vr.say(eg.text, language="ja-JP")
-                 vr.pause(length=1)
-        else:
-            vr.say("終了します。", language="ja-JP")
+    # Use Media Stream for GPT-Realtime
+    connect = vr.connect()
+    public_url = os.getenv("PUBLIC_BASE_URL", "").replace("https://", "wss://").replace("http://", "ws://")
+    connect.stream(url=f"{public_url}/realtime/stream/{CallSid}")
             
     return Response(content=str(vr), media_type="application/xml")
 
-@router.post("/record_callback")
-async def handle_recording(
-    request: Request,
-    scenario_id: int,
-    q_curr: int, 
-    CallSid: str = Form(...),
-    RecordingUrl: str = Form(...),
-    RecordingSid: str = Form(...),
-    db: Session = Depends(get_db)
-):
-    # Get current question for sort_order
-    current_q = db.query(models.Question).get(q_curr)
-    
-    # 1. Save Answer
-    answer = models.Answer(
-        call_sid=CallSid,
-        question_id=q_curr,
-        answer_type="recording",
-        recording_sid=RecordingSid,
-        recording_url_twilio=RecordingUrl,
-        transcript_status="processing",
-        question_sort_at_call=current_q.sort_order if current_q else 0
-    )
-    db.add(answer)
-    db.commit()
-    db.refresh(answer)
-    
-    # 2. Transcribe (async)
-    import asyncio
-    asyncio.create_task(transcribe_with_whisper(answer.id, RecordingUrl, RecordingSid))
-
+@router.post("/bridge_twiml")
+async def bridge_twiml(number: str = Query(...)):
     vr = VoiceResponse()
-
-    # 3. Find Next Question
-    if not current_q:
-        vr.say("エラーが発生しました。", language="ja-JP")
-        return Response(content=str(vr), media_type="application/xml")
-
-    next_question = db.query(models.Question).filter(
-        models.Question.scenario_id == scenario_id,
-        models.Question.is_active == True,
-        models.Question.sort_order > current_q.sort_order
-    ).order_by(models.Question.sort_order).first()
-
-    if next_question:
-        # Ask next
-        vr.say(next_question.text, language="ja-JP")
-        action_url = f"/twilio/record_callback?scenario_id={scenario_id}&q_curr={next_question.id}"
-        vr.record(
-            action=action_url, 
-            finish_on_key="#",
-            timeout=0,
-            max_length=180
-        )
-    else:
-        # Phase 4: Message Recording
-        vr.say("担当者に伝えたいことがあればお話しください。終わったらシャープを押してください。", language="ja-JP")
-        vr.record(
-            action=f"/twilio/message_record?scenario_id={scenario_id}",
-            finish_on_key="#",
-            timeout=10,
-            max_length=180
-        )
-            
+    vr.say("担当者にお繋ぎします。少々お待ちください。", language="ja-JP")
+    vr.dial(number)
     return Response(content=str(vr), media_type="application/xml")
 
-@router.post("/message_record")
-async def handle_message_recording(
-    request: Request,
-    scenario_id: int,
+@router.post("/status_callback")
+async def status_callback(
     CallSid: str = Form(...),
-    RecordingUrl: str = Form(...),
-    RecordingSid: str = Form(...),
+    CallStatus: str = Form(...),
+    CallDuration: int = Form(None),
     db: Session = Depends(get_db)
 ):
-    # Save Message
-    msg = models.Message(
-        call_sid=CallSid,
-        recording_sid=RecordingSid,
-        recording_url=RecordingUrl,
-        transcript_text="(文字起こし中...)"
-    )
-    db.add(msg)
-    db.commit()
-    db.refresh(msg)
-    
-    # Async transcribe
-    import asyncio
-    asyncio.create_task(transcribe_message_with_whisper(msg.id, RecordingUrl, RecordingSid))
-    
-    vr = VoiceResponse()
-    vr.say("録音を受け付けました。", language="ja-JP")
-    
-    # Confirm
-    from twilio.twiml.voice_response import Gather
-    gather = Gather(num_digits=1, action=f"/twilio/message_confirm?scenario_id={scenario_id}", timeout=10)
-    gather.say("他にお話しすることはありますか？ ある場合は、1を。終わる場合は、2、またはそのままお待ちください。", language="ja-JP")
-    vr.append(gather)
-    
-    # If no input, default to end (2)
-    vr.redirect(f"/twilio/message_confirm?scenario_id={scenario_id}&Digits=2")
-    
-    return Response(content=str(vr), media_type="application/xml")
-
-@router.post("/message_confirm")
-async def handle_message_confirm(
-    request: Request,
-    scenario_id: int,
-    Digits: str = Form("2"),
-    db: Session = Depends(get_db)
-):
-    vr = VoiceResponse()
-    
-    if Digits == "1":
-        # Retry recording
-        vr.say("担当者に伝えたいことがあればお話しください。終わったらシャープを押してください。", language="ja-JP")
-        vr.record(
-            action=f"/twilio/message_record?scenario_id={scenario_id}",
-            finish_on_key="#",
-            timeout=10,
-            max_length=180
-        )
-        return Response(content=str(vr), media_type="application/xml")
-    
-    # End
-    ending_guidances = db.query(models.EndingGuidance).filter(
-        models.EndingGuidance.scenario_id == scenario_id
-    ).order_by(models.EndingGuidance.sort_order).all()
-    
-    if ending_guidances:
-        for eg in ending_guidances:
-            vr.say(eg.text, language="ja-JP")
-            vr.pause(length=1)
-    else:
-        vr.say("お問い合わせありがとうございました。", language="ja-JP")
+    call = db.query(models.Call).filter(models.Call.call_sid == CallSid).first()
+    if call:
+        call.status = CallStatus
+        if CallDuration:
+            call.duration = CallDuration
         
-    vr.say("失礼いたします。", language="ja-JP")
-    vr.hangup()
-    
-    return Response(content=str(vr), media_type="application/xml")
-
-# Keep transcription_callback for safety/legacy? Or remove? 
-# The user wants Whisper, so native transcription is likely disabled or ignored.
-# We will keep it but it does nothing if we don't enable it in vr.record parameters (transcribe=True is default false).
-@router.post("/transcription_callback")
-async def handle_transcription(
-    request: Request,
-    TranscriptionText: str = Form(None),
-    RecordingSid: str = Form(...),
-    db: Session = Depends(get_db)
-):
-    # Log native Twilio transcription if it ever comes
-    print(f"Native transcription Rx for {RecordingSid}: {TranscriptionText}")
+        # Auto Classification logic
+        if not call.classification:
+            if CallStatus == "completed":
+                if CallDuration and CallDuration < 15:
+                    call.classification = "冒頭15秒以内切断"
+                elif call.bridge_executed:
+                    call.classification = "担当者に繋いだ"
+                else:
+                    call.classification = "聞いたが担当者まで進まなかった"
+        
+        db.commit()
     return Response(content="OK", media_type="text/plain")
+

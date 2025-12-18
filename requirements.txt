@@ -10,3 +10,6 @@ python-dotenv
 openai
 httpx
 pyzipper
+websockets
+pydantic-settings
+psycopg2-binary
