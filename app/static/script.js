@@ -115,6 +115,8 @@ async function saveAll() {
         return;
     }
 
+    const changedItems = [];
+
     // 1. Save Scenario
     const payload = {
         name,
@@ -133,6 +135,16 @@ async function saveAll() {
     }
 
     try {
+        // Simple logic to detect basic changes (could be more robust)
+        if (currentScenario) {
+            if (currentScenario.name !== name) changedItems.push("シナリオ名");
+            if ((currentScenario.greeting_text || '') !== greeting) changedItems.push("挨拶メッセージ");
+            if ((currentScenario.disclaimer_text || '') !== disclaimer) changedItems.push("録音告知");
+            if ((currentScenario.question_guidance_text || '') !== guidance) changedItems.push("質問前ガイダンス");
+        } else {
+            changedItems.push("新規シナリオ");
+        }
+
         const res = await fetch(url, {
             method: method,
             headers: { 'Content-Type': 'application/json' },
@@ -153,7 +165,19 @@ async function saveAll() {
             }
         });
 
-        const notificationItems = [`シナリオ「${savedScenario.name}」を保存しました`];
+        let questionsChanged = false;
+        // Basic check: length diff or reorder or text diff
+        // For strict diff, we'd compare detailed props. Here assume if we save, we check.
+        // Or simply add "質問設定" if array is non-empty.
+        // Let's rely on backend responses or simple "Questions updated"
+        if (currentQuestions.some(q => q.is_new) || currentQuestions.length !== finalOrder.length) {
+            questionsChanged = true;
+        }
+        // Deep compare for text changes?? Too heavy?
+        // Let's just add "質問設定" if there are questions.
+        // Actually user wants specific "Question #2" etc if possible.
+        // For simplicity, let's list "質問設定(更新あり)" or similar if logic is complex.
+        // Or, we can push "質問 #N" inside loop.
 
         for (const q of finalOrder) {
             let qUrl = `${API_BASE}/questions/`;
@@ -168,6 +192,13 @@ async function saveAll() {
             if (q.id && !q.is_new) {
                 qUrl += `${q.id}`;
                 qMethod = 'PUT';
+                // Check if changed?
+                const original = currentQuestions.find(cq => cq.id === q.id);
+                if (original && (original.text !== q.text || original.sort_order !== q.sort_order)) {
+                    changedItems.push(`質問 #${q.sort_order}`);
+                }
+            } else {
+                changedItems.push(`質問 #${q.sort_order} (新規)`);
             }
 
             await fetch(qUrl, {
@@ -200,6 +231,12 @@ async function saveAll() {
             if (g.id && !g.is_new) {
                 qUrl += `${g.id}`;
                 qMethod = 'PUT';
+                const original = currentEndingGuidances.find(cg => cg.id === g.id);
+                if (original && (original.text !== g.text || original.sort_order !== g.sort_order)) {
+                    changedItems.push(`終話ガイダンス #${g.sort_order}`);
+                }
+            } else {
+                changedItems.push(`終話ガイダンス #${g.sort_order} (新規)`);
             }
 
             await fetch(qUrl, {
@@ -216,7 +253,11 @@ async function saveAll() {
         }
         await selectScenario(savedScenario.id);
         loadScenarios();
-        showNotification('保存完了', notificationItems);
+
+        if (changedItems.length === 0) changedItems.push("変更はありませんでした");
+        // Remove duplicates just in case
+        const uniqueItems = [...new Set(changedItems)];
+        showNotification('保存完了', uniqueItems);
 
     } catch (e) {
         console.error(e);
@@ -473,9 +514,16 @@ function updateQuestionText(index, newText) {
 
 // Drag & Drop
 function handleDragStart(e) {
-    draggedElement = this;
-    this.classList.add('dragging');
+    // Check if handle is clicked
+    if (!e.target.classList.contains('drag-handle')) {
+        e.preventDefault();
+        return;
+    }
+    // Set dragged element to the row, not the handle
+    draggedElement = e.target.closest('.question-item, .ending-item');
+    draggedElement.classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
+    // Fix for drag image if needed, or browser default
 }
 
 function handleDragOver(e) {
@@ -484,10 +532,11 @@ function handleDragOver(e) {
     }
     e.dataTransfer.dropEffect = 'move';
 
-    const afterElement = getDragAfterElement(e.currentTarget.parentElement, e.clientY);
-    if (afterElement == null) {
-        e.currentTarget.classList.add('drag-over');
-    }
+    // Target constraint
+    const container = e.currentTarget.parentElement;
+    const afterElement = getDragAfterElement(container, e.clientY);
+
+    // Visual feedback logic (simplified)
     return false;
 }
 
@@ -668,6 +717,12 @@ async function loadLogs() {
                 let downloadLink = a.recording_sid ?
                     `<a href="${API_BASE}/download_recording/${a.recording_sid}" class="download-link-text"><i class="fas fa-download"></i> 音声DL</a>` : '';
 
+                // Add Player
+                let audioPlayer = '';
+                if (a.recording_sid) {
+                    audioPlayer = `<audio controls src="${API_BASE}/audio_proxy/${a.recording_sid}" style="height: 30px; margin-right: 10px; vertical-align: middle;"></audio>`;
+                }
+
                 let transcriptDisplay = '';
                 if (a.transcript_text) {
                     transcriptDisplay = escapeHtml(a.transcript_text);
@@ -684,9 +739,12 @@ async function loadLogs() {
                 // Show Answer logic (accordion style item)
                 answersHtml += `<div style="font-size:0.9rem; margin-bottom:8px; padding:8px; background:#fff; border: 1px solid #eee; border-radius:4px;">
                     <div style="color:#555; font-size:0.85rem; margin-bottom:4px;"><strong>Q:</strong> ${escapeHtml(a.question_text || '??')}</div>
-                    <div style="color:#333; display: flex; justify-content: space-between; align-items: flex-start;">
-                        <span style="flex:1;">A: ${transcriptDisplay}</span>
-                        <span style="margin-left:10px; font-size: 0.8rem;">${downloadLink}</span>
+                    <div style="color:#333;">
+                        <div style="margin-bottom: 5px;">A: ${transcriptDisplay}</div>
+                        <div style="display: flex; align-items: center; justify-content: flex-end;">
+                            ${audioPlayer}
+                            <span style="font-size: 0.8rem;">${downloadLink}</span>
+                        </div>
                     </div>
                 </div>`;
             });
@@ -716,6 +774,15 @@ async function loadLogs() {
 
         const bulkDownload = `<a href="${API_BASE}/download_call_recordings/${call.call_sid}" class="btn-download-all" title="全録音をZIPでダウンロード"><i class="fas fa-file-archive"></i> 音声ZIP</a>`;
 
+        // Full Call Audio Player
+        let fullAudioPlayer = '';
+        if (call.recording_sid) {
+            fullAudioPlayer = `<div style="margin-right: 15px; display: inline-flex; align-items: center;">
+                <span style="font-size:0.8rem; color:#666; margin-right:5px;">通話全体:</span>
+                <audio controls src="${API_BASE}/audio_proxy/${call.recording_sid}" style="height: 30px; vertical-align: middle;"></audio>
+             </div>`;
+        }
+
         // Status badge
         let statusBadge = `<span style="padding: 2px 6px; border-radius: 4px; background: #eee; font-size: 0.8rem;">${call.status}</span>`;
         if (call.status === 'completed') statusBadge = `<span style="padding: 2px 6px; border-radius: 4px; background: #e8f5e9; color: #2e7d32; font-size: 0.8rem;">完了</span>`;
@@ -729,8 +796,13 @@ async function loadLogs() {
                 <td>${escapeHtml(call.scenario_name || '-')} <br>${statusBadge}</td>
                 <td>
                     <div style="display: flex; align-items: center; justify-content: space-between;">
-                        <div>${toggleBtn}</div>
-                        <div>${bulkDownload}</div>
+                        <div style="display:flex; align-items:center;">
+                            ${toggleBtn}
+                        </div>
+                        <div style="display:flex; align-items:center;">
+                            ${fullAudioPlayer}
+                            ${bulkDownload}
+                        </div>
                     </div>
                     ${answersContainer}
                 </td>

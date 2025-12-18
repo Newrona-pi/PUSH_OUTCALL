@@ -234,7 +234,7 @@ def download_call_recordings(call_sid: str, db: Session = Depends(get_db)):
     # Also fetch Call for naming
     call = db.query(models.Call).filter(models.Call.call_sid == call_sid).first()
     
-    if not answers:
+    if not answers and not (call and call.recording_sid):
         raise HTTPException(status_code=404, detail="No recordings found for this call")
     
     # Naming Helpers
@@ -252,6 +252,15 @@ def download_call_recordings(call_sid: str, db: Session = Depends(get_db)):
         zip_file.setpassword(b"attendme")
         zip_file.setencryption(pyzipper.WZ_AES, nbits=256)
         
+        # 1. Full Recording
+        if call and call.recording_sid:
+            url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Recordings/{call.recording_sid}.mp3"
+            response = requests.get(url, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+            if response.status_code == 200:
+                filename = f"{date_part}_{sc_name}_{to_num}_{from_num}_{short_sid}_FULL.mp3"
+                zip_file.writestr(filename, response.content)
+
+        # 2. Answers
         for idx, answer in enumerate(answers, 1):
             if answer.recording_sid:
                 url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Recordings/{answer.recording_sid}.mp3"
@@ -267,6 +276,32 @@ def download_call_recordings(call_sid: str, db: Session = Depends(get_db)):
         zip_buffer,
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename=call_{call_sid}_recordings.zip"}
+    )
+
+@router.get("/audio_proxy/{recording_sid}")
+def proxy_audio_playback(recording_sid: str):
+    """Proxy stream audio from Twilio for playback in admin UI"""
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        raise HTTPException(status_code=500, detail="Twilio credentials not configured")
+
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Recordings/{recording_sid}.mp3"
+    
+    # Proxy without loading full content if possible, or simple get content
+    # For <audio> tag seeking, range headers are complex.
+    # Simple proxy: fetch entire content and stream back.
+    
+    response = requests.get(url, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN), stream=True)
+    
+    if response.status_code != 200:
+         raise HTTPException(status_code=404, detail="Recording not found")
+         
+    return StreamingResponse(
+        io.BytesIO(response.content), # Not truly streaming in this simple proxy implementation to avoid range complexity
+        media_type="audio/mpeg",
+        headers={
+            "Content-Disposition": "inline",
+            "Cache-Control": "public, max-age=3600"
+        }
     )
 
 # --- Logs & Stats ---
