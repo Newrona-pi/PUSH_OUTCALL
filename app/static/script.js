@@ -14,7 +14,8 @@ function openTab(tabId) {
     const btn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.getAttribute('onclick').includes(tabId));
     if (btn) btn.classList.add('active');
 
-    if (tabId === 'tab-scenarios') loadScenarios();
+    if (tabId === 'tab-scenario-list') loadScenarios();
+    if (tabId === 'tab-scenarios' && !currentScenario) showCreateScenarioForm();
     if (tabId === 'tab-outbound') loadOutboundScenarios();
     if (tabId === 'tab-logs') loadLogs();
 }
@@ -23,18 +24,42 @@ function openTab(tabId) {
 async function loadScenarios() {
     const res = await fetch(`${API_BASE}/scenarios/`);
     const data = await res.json();
-    const list = document.getElementById('scenario-list');
-    list.innerHTML = '';
+    const tbody = document.getElementById('scenario-list-body');
+    tbody.innerHTML = '';
 
     data.forEach(s => {
-        const li = document.createElement('li');
-        li.dataset.scenarioId = s.id;
-        li.innerHTML = `
-            <span onclick="selectScenario(${s.id})"><i class="fas fa-file-alt"></i> ${escapeHtml(s.name)}</span>
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${escapeHtml(s.name)}</td>
+            <td><span class="badge completed">${s.conversation_mode === 'A' ? '安定型' : '応用型'}</span></td>
+            <td>${new Date(s.created_at).toLocaleString()}</td>
+            <td>
+                <button class="secondary small" onclick="editScenario(${s.id})">
+                    <i class="fas fa-edit"></i> 設計
+                </button>
+                <button class="primary small" onclick="goToCallList(${s.id})">
+                    <i class="fas fa-phone"></i> 架電録
+                </button>
+            </td>
         `;
-        if (currentScenario && currentScenario.id === s.id) li.classList.add('active');
-        list.appendChild(li);
+        tbody.appendChild(tr);
     });
+}
+
+function editScenario(id) {
+    selectScenario(id);
+    openTab('tab-scenarios');
+}
+
+function goToCallList(id) {
+    // We don't necessarily 'select' for design here, but we set the dropdown for execution
+    openTab('tab-outbound');
+    const select = document.getElementById('outbound-scenario-select');
+    // Wait for scenarios to load in outbound tab if needed, or just set it
+    setTimeout(() => {
+        select.value = id;
+        loadTargets(id);
+    }, 100);
 }
 
 async function selectScenario(scenarioId) {
@@ -42,13 +67,11 @@ async function selectScenario(scenarioId) {
     const scenario = await res.json();
     currentScenario = scenario;
 
-    document.querySelectorAll('#scenario-list li').forEach(l => {
-        l.classList.remove('active');
-        if (parseInt(l.dataset.scenarioId) === scenarioId) l.classList.add('active');
-    });
+    currentScenario = scenario;
 
-    document.getElementById('welcome-message').classList.add('hidden');
-    document.getElementById('scenario-editor').classList.remove('hidden');
+    // Remove list-specific highlight since list is gone from this tab
+    // document.getElementById('welcome-message').classList.add('hidden'); // welcome message gone
+    // document.getElementById('scenario-editor').classList.remove('hidden'); // editor always visible
 
     document.getElementById('editor-title').textContent = "シナリオ編集: " + scenario.name;
     document.getElementById('scenario-id').value = scenario.id;
@@ -72,8 +95,13 @@ function showCreateScenarioForm() {
     currentScenario = null;
     currentQuestions = [];
     currentEndingGuidances = [];
-    document.getElementById('welcome-message').classList.add('hidden');
-    document.getElementById('scenario-editor').classList.remove('hidden');
+
+    // Switch to design tab if not already there
+    if (document.getElementById('tab-scenarios').offsetParent === null) {
+        openTab('tab-scenarios');
+    }
+
+    document.getElementById('editor-title').textContent = "新規シナリオ作成";
     document.getElementById('scenario-id').value = '';
     document.getElementById('scenario-form').reset();
     document.getElementById('questions-container').innerHTML = '';
@@ -335,4 +363,4 @@ function escapeHtml(text) {
 }
 
 // Initial load
-loadScenarios();
+openTab('tab-scenario-list');

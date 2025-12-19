@@ -19,8 +19,11 @@
                     style="font-weight: 300; font-size: 0.8em; opacity: 0.7;">Dynamic Series</span></h1>
         </div>
         <nav>
-            <button class="tab-btn active" onclick="openTab('tab-scenarios')">
-                <i class="fas fa-project-diagram"></i> シナリオ設計
+            <button class="tab-btn active" onclick="openTab('tab-scenario-list')">
+                <i class="fas fa-list"></i> シナリオ一覧
+            </button>
+            <button class="tab-btn" onclick="openTab('tab-scenarios')">
+                <i class="fas fa-edit"></i> シナリオ設計
             </button>
             <button class="tab-btn" onclick="openTab('tab-outbound')">
                 <i class="fas fa-phone-alt"></i> 架電リスト
@@ -35,135 +38,139 @@
     </header>
 
     <main>
-        <!-- Tab 1: Scenarios -->
-        <section id="tab-scenarios" class="tab-content active">
-            <div class="split-view">
-                <!-- Left: List -->
-                <div class="sidebar panel">
-                    <h2>SCENARIOS</h2>
-                    <button class="primary" style="width: 100%; margin-bottom: 1rem;"
-                        onclick="showCreateScenarioForm()">
-                        <i class="fas fa-plus"></i> 新規シナリオ作成
+        <!-- Tab 0: Scenario List -->
+        <section id="tab-scenario-list" class="tab-content active">
+            <div class="panel">
+                <div class="header-actions">
+                    <h2>管理中シナリオ一覧</h2>
+                    <button class="primary" onclick="showCreateScenarioForm()">
+                        <i class="fas fa-plus"></i> 新規作成
                     </button>
-                    <ul id="scenario-list">
-                        <!-- JS renders list here -->
-                    </ul>
                 </div>
+                <table id="scenarios-table" style="margin-top: 1rem;">
+                    <thead>
+                        <tr>
+                            <th>シナリオ名</th>
+                            <th>対話モード</th>
+                            <th>作成日時</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="scenario-list-body">
+                        <!-- JS renders list here -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
 
-                <!-- Right: Details -->
-                <div class="content panel" id="scenario-detail-panel">
-                    <div id="welcome-message" style="text-align: center; color: var(--text-muted); margin-top: 50px;">
-                        <i class="fas fa-magic" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.2;"></i>
-                        <p>左側のリストからシナリオを選択するか、<br>新しいシナリオを設計してください。</p>
+        <!-- Tab 1: Scenarios (Editor Only) -->
+        <section id="tab-scenarios" class="tab-content">
+            <div class="content panel" id="scenario-detail-panel">
+                <div id="scenario-editor">
+                    <div class="header-actions">
+                        <h2 id="editor-title">SCENARIO EDITOR</h2>
+                        <div class="actions-right">
+                            <button type="button" class="secondary small" onclick="copyCurrentScenario()">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                            <button type="button" class="danger small" onclick="deleteCurrentScenario()">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
                     </div>
 
-                    <!-- Scenario Edit Form -->
-                    <div id="scenario-editor" class="hidden">
-                        <div class="header-actions">
-                            <h2 id="editor-title">SCENARIO EDITOR</h2>
-                            <div class="actions-right">
-                                <button type="button" class="secondary small" onclick="copyCurrentScenario()">
-                                    <i class="fas fa-copy"></i>
-                                </button>
-                                <button type="button" class="danger small" onclick="deleteCurrentScenario()">
-                                    <i class="fas fa-trash"></i>
-                                </button>
+                    <form id="scenario-form">
+                        <input type="hidden" id="scenario-id">
+
+                        <div class="form-row" style="display: flex; gap: 1rem; margin-bottom: 2rem;">
+                            <div class="form-group" style="flex: 2;">
+                                <label>シナリオ名称</label>
+                                <input type="text" id="scenario-name" placeholder="例：2025年冬キャンペーン" required>
+                            </div>
+                            <div class="form-group" style="flex: 1;">
+                                <label>AI対話モード</label>
+                                <select id="scenario-mode">
+                                    <option value="A">A: 質問順守 (安定型)</option>
+                                    <option value="C">C: 臨機応変（応用型）</option>
+                                </select>
                             </div>
                         </div>
 
-                        <form id="scenario-form">
-                            <input type="hidden" id="scenario-id">
+                        <div class="panel"
+                            style="background: rgba(255,255,255,0.02); margin-bottom: 2rem; border: 1px dashed var(--panel-border);">
+                            <label style="margin-bottom: 1rem; display: block;">音声フロー設定</label>
+                            <div class="form-group">
+                                <label>開始時の挨拶 (Greeting)</label>
+                                <textarea id="scenario-greeting" placeholder="お電話ありがとうございます。こちらは..."></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>録音告知・免責事項</label>
+                                <textarea id="scenario-disclaimer" placeholder="この通話はサービス向上のため録音されます..."></textarea>
+                            </div>
+                        </div>
 
-                            <div class="form-row" style="display: flex; gap: 1rem; margin-bottom: 2rem;">
-                                <div class="form-group" style="flex: 2;">
-                                    <label>シナリオ名称</label>
-                                    <input type="text" id="scenario-name" placeholder="例：2025年冬キャンペーン" required>
-                                </div>
-                                <div class="form-group" style="flex: 1;">
-                                    <label>AI対話モード</label>
-                                    <select id="scenario-mode">
-                                        <option value="A">A: 質問順守 (安定型)</option>
-                                        <option value="C">C: 臨機応変（応用型）</option>
-                                    </select>
+                        <div id="questions-area">
+                            <label style="margin-bottom: 1rem; display: block;">STEP-BY-STEP QUESTIONS</label>
+                            <div id="questions-container"></div>
+                            <div class="add-question-box"
+                                style="background: var(--glass); padding: 1rem; border-radius: 12px; margin-top: 1rem;">
+                                <div style="display: flex; gap: 0.5rem;">
+                                    <textarea id="new-question-text" placeholder="次の質問を入力..."
+                                        style="min-height: 40px;"></textarea>
+                                    <button type="button" class="primary" onclick="addQuestionToList()"
+                                        style="padding: 0 1.5rem;">追加</button>
                                 </div>
                             </div>
+                        </div>
 
-                            <div class="panel"
-                                style="background: rgba(255,255,255,0.02); margin-bottom: 2rem; border: 1px dashed var(--panel-border);">
-                                <label style="margin-bottom: 1rem; display: block;">音声フロー設定</label>
-                                <div class="form-group">
-                                    <label>開始時の挨拶 (Greeting)</label>
-                                    <textarea id="scenario-greeting" placeholder="お電話ありがとうございます。こちらは..."></textarea>
-                                </div>
-                                <div class="form-group">
-                                    <label>録音告知・免責事項</label>
-                                    <textarea id="scenario-disclaimer" placeholder="この通話はサービス向上のため録音されます..."></textarea>
-                                </div>
-                            </div>
+                        <div id="ending-area" style="margin-top: 2rem;">
+                            <label style="margin-bottom: 1rem; display: block;">CALL TERMINATION GUIDANCE</label>
+                            <div id="ending-container"></div>
+                            <button type="button" class="secondary small" onclick="addEndingGuidance()">
+                                <i class="fas fa-plus"></i> 終了メッセージ追加
+                            </button>
+                        </div>
 
-                            <div id="questions-area">
-                                <label style="margin-bottom: 1rem; display: block;">STEP-BY-STEP QUESTIONS</label>
-                                <div id="questions-container"></div>
-                                <div class="add-question-box"
-                                    style="background: var(--glass); padding: 1rem; border-radius: 12px; margin-top: 1rem;">
-                                    <div style="display: flex; gap: 0.5rem;">
-                                        <textarea id="new-question-text" placeholder="次の質問を入力..."
-                                            style="min-height: 40px;"></textarea>
-                                        <button type="button" class="primary" onclick="addQuestionToList()"
-                                            style="padding: 0 1.5rem;">追加</button>
-                                    </div>
+                        <div class="panel"
+                            style="background: rgba(255,255,255,0.02); margin-bottom: 2rem; border: 1px solid var(--panel-border);">
+                            <label style="margin-bottom: 1rem; display: block;">システムパラメータ</label>
+                            <div class="form-row"
+                                style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label>稼働開始</label>
+                                    <input type="time" id="scenario-start-time" value="10:00">
                                 </div>
-                            </div>
-
-                            <div id="ending-area" style="margin-top: 2rem;">
-                                <label style="margin-bottom: 1rem; display: block;">CALL TERMINATION GUIDANCE</label>
-                                <div id="ending-container"></div>
-                                <button type="button" class="secondary small" onclick="addEndingGuidance()">
-                                    <i class="fas fa-plus"></i> 終了メッセージ追加
-                                </button>
-                            </div>
-
-                            <div class="panel"
-                                style="background: rgba(255,255,255,0.02); margin-bottom: 2rem; border: 1px solid var(--panel-border);">
-                                <label style="margin-bottom: 1rem; display: block;">システムパラメータ</label>
-                                <div class="form-row"
-                                    style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
-                                    <div class="form-group" style="margin-bottom: 0;">
-                                        <label>稼働開始</label>
-                                        <input type="time" id="scenario-start-time" value="10:00">
-                                    </div>
-                                    <div class="form-group" style="margin-bottom: 0;">
-                                        <label>稼働終了</label>
-                                        <input type="time" id="scenario-end-time" value="18:00">
-                                    </div>
-                                    <div class="form-group" style="margin-bottom: 0;">
-                                        <label>無言警告 (秒)</label>
-                                        <input type="number" id="scenario-timeout-short" value="15">
-                                    </div>
-                                    <div class="form-group" style="margin-bottom: 0;">
-                                        <label>強制切断 (秒)</label>
-                                        <input type="number" id="scenario-timeout-long" value="60">
-                                    </div>
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label>稼働終了</label>
+                                    <input type="time" id="scenario-end-time" value="18:00">
                                 </div>
-                                <div class="form-row"
-                                    style="display: flex; gap: 1rem; padding-top: 1.5rem; border-top: 1px solid var(--panel-border);">
-                                    <div class="form-group" style="flex: 1; margin-bottom: 0;">
-                                        <label>担当者転送先 (Bridge)</label>
-                                        <input type="text" id="scenario-bridge" placeholder="+8190...">
-                                    </div>
-                                    <div class="form-group" style="flex: 2; margin-bottom: 0;">
-                                        <label>SMSテンプレート</label>
-                                        <textarea id="scenario-sms" style="min-height: 40px;"
-                                            placeholder="資料はこちらから確認できます: https://..."></textarea>
-                                    </div>
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label>無言警告 (秒)</label>
+                                    <input type="number" id="scenario-timeout-short" value="15">
+                                </div>
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label>強制切断 (秒)</label>
+                                    <input type="number" id="scenario-timeout-long" value="60">
                                 </div>
                             </div>
-
-                            <div class="actions-right" style="margin-top: 2rem;">
-                                <button type="submit" class="primary" style="padding: 0.8rem 3rem;">保存内容を反映する</button>
+                            <div class="form-row"
+                                style="display: flex; gap: 1rem; padding-top: 1.5rem; border-top: 1px solid var(--panel-border);">
+                                <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                                    <label>担当者転送先 (Bridge)</label>
+                                    <input type="text" id="scenario-bridge" placeholder="+8190...">
+                                </div>
+                                <div class="form-group" style="flex: 2; margin-bottom: 0;">
+                                    <label>SMSテンプレート</label>
+                                    <textarea id="scenario-sms" style="min-height: 40px;"
+                                        placeholder="資料はこちらから確認できます: https://..."></textarea>
+                                </div>
                             </div>
-                        </form>
-                    </div>
+                        </div>
+
+                        <div class="actions-right" style="margin-top: 2rem;">
+                            <button type="submit" class="primary" style="padding: 0.8rem 3rem;">保存内容を反映する</button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </section>
@@ -243,7 +250,6 @@
             </div>
         </section>
 
-        </section>
     </main>
 
     <script src="/static/script.js?v={{ now_timestamp }}"></script>
