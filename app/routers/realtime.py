@@ -20,7 +20,7 @@ router = APIRouter(
 )
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-VOICE = "shimmer" #alloy, echo, shimmer, ash, ballad, coral, sage,verse
+VOICE = "coral" # Bright, energetic female voice (alloy, echo, shimmer, ash, ballad, coral, sage, verse)
 
 # Realtime API URL
 REALTIME_API_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
@@ -106,6 +106,15 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
                         elif data['event'] == 'start':
                             state["stream_sid"] = data['start']['streamSid']
                             logger.info(f"Stream started: {state['stream_sid']}")
+                        
+                        elif data['event'] == 'dtmf':
+                            # Handle DTMF (keypad) input
+                            digit = data.get('dtmf', {}).get('digit', '')
+                            if digit == '#':
+                                logger.info("User pressed # - manually advancing to next question")
+                                # Commit current audio and trigger response
+                                await openai_ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
+                                await openai_ws.send(json.dumps({"type": "response.create"}))
                         
                         elif data['event'] == 'stop':
                             logger.info("Twilio stream stopped")
@@ -196,6 +205,16 @@ async def initialize_openai_session(openai_ws, scenario):
 - 日付を聞いたら必ず復唱して確認してください。
 - 「明日」「明後日」などの相対的な日付は、必ず `calculate_date` ツールを使って特定してください。
 
+【相槌・復唱について】
+- 相槌（「はい」「ええ」など）は最小限にしてください。多すぎるとウザがられます。
+- 回答を受けたら、簡潔に復唱確認してください。例：「○○大学出身ですね、承知しました」
+- 復唱は1文で完結させ、すぐに次の質問に進んでください。
+
+【質問の進め方】
+- 質問を読み上げた後、1秒間の沈黙を取ってからユーザーの回答を待ってください。
+- ユーザーは15秒以内に回答を開始します。それ以上待っても反応がない場合のみ、もう一度促してください。
+- シャープ（#）ボタンが押されたら、即座に次の質問に進んでください。
+
 【会話の進め方】
 1. 挨拶を行い、通話の目的を伝えます。
 2. 質問リストにある内容を順番に聞き出します。
@@ -215,7 +234,12 @@ async def initialize_openai_session(openai_ws, scenario):
             "modalities": ["text", "audio"],
             "input_audio_format": "g711_ulaw",
             "output_audio_format": "g711_ulaw",
-            "turn_detection": None,
+            "turn_detection": {
+                "type": "server_vad",
+                "threshold": 0.5,
+                "prefix_padding_ms": 300,
+                "silence_duration_ms": 15000  # 15 seconds for user thinking time
+            },
             "tools": [
                 {
                     "type": "function",

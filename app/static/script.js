@@ -3,6 +3,22 @@ let currentScenario = null;
 let currentQuestions = [];
 let currentEndingGuidances = [];
 
+// Helper: Format date to Japan Standard Time (JST)
+function formatJST(dateString) {
+    if (!dateString) return '-';
+    return new Date(dateString).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+}
+
+// Helper: Format phone number to Japanese domestic format
+function formatJapanesePhone(phoneNumber) {
+    if (!phoneNumber) return '-';
+    // Convert +81 to 0 for Japanese domestic display
+    if (phoneNumber.startsWith('+81')) {
+        return '0' + phoneNumber.substring(3);
+    }
+    return phoneNumber;
+}
+
 // --- Tab Switching ---
 function openTab(tabId) {
     const el = document.getElementById(tabId);
@@ -24,7 +40,7 @@ async function loadScenarios() {
         tr.innerHTML = `
             <td>${escapeHtml(s.name)}</td>
             <td><span class="badge completed">${s.conversation_mode === 'A' ? '安定型' : '応用型'}</span></td>
-            <td>${new Date(s.created_at).toLocaleString()}</td>
+            <td>${formatJST(s.created_at)}</td>
             <td>
                 <button class="secondary small" onclick="editScenario(${s.id})">
                     <i class="fas fa-edit"></i> 設計
@@ -361,9 +377,9 @@ async function loadTargets(scenarioId) {
     data.forEach(t => {
         tbody.innerHTML += `
             <tr>
-                <td>${escapeHtml(t.phone_number)}</td>
+                <td>${formatJapanesePhone(t.phone_number)}</td>
                 <td><span class="badge ${t.status}">${t.status}</span></td>
-                <td>${new Date(t.created_at).toLocaleString()}</td>
+                <td>${formatJST(t.created_at)}</td>
                 <td>
                     <button class="secondary small" onclick="deleteTarget(${t.id}, ${scenarioId})">削除</button>
                 </td>
@@ -401,9 +417,15 @@ async function stopAllCalls() {
 
 // --- Logs ---
 async function loadLogs() {
-    const phone = document.getElementById('filter-phone').value;
-    let url = `${API_BASE}/calls/?limit=50`;
-    if (phone) url += `&to_number=${encodeURIComponent(phone)}`;
+    const toNumber = document.getElementById('filter-to')?.value || '';
+    const startDate = document.getElementById('filter-start-date')?.value || '';
+    const endDate = document.getElementById('filter-end-date')?.value || '';
+
+    let url = `${API_BASE}/calls/?limit=100`;
+    if (toNumber) url += `&to_number=${encodeURIComponent(toNumber)}`;
+    if (currentScenarioFilter) url += `&scenario_id=${currentScenarioFilter}`;
+    if (startDate) url += `&start_date=${startDate}`;
+    if (endDate) url += `&end_date=${endDate}`;
 
     const res = await fetch(url);
     const data = await res.json();
@@ -412,19 +434,45 @@ async function loadLogs() {
     tbody.innerHTML = '';
 
     data.forEach(call => {
-        const transcript = call.transcript_full || call.answers.map(a => a.transcript_text).join(' ');
-        const recording = call.recording_sid ? `<audio controls src="${API_BASE}/audio_proxy/${call.recording_sid}"></audio>` : '-';
+        // Build answer data display
+        let answerDataHtml = '';
+        if (call.answers && call.answers.length > 0) {
+            answerDataHtml = '<div style="max-width: 500px;">';
+            call.answers.forEach((answer, idx) => {
+                const questionText = answer.question_text || `質問${idx + 1}`;
+                const transcript = answer.transcript_text || '(文字起こしなし)';
+                const audioLink = answer.recording_sid
+                    ? `<audio controls src="${API_BASE}/audio_proxy/${answer.recording_sid}" style="width: 100%; margin-top: 3px;"></audio>`
+                    : '';
+
+                answerDataHtml += `
+                    <div style="margin-bottom: 10px; padding: 5px; background: #f9f9f9; border-left: 3px solid var(--primary);">
+                        <strong>Q${idx + 1}:</strong> ${escapeHtml(questionText)}<br>
+                        <strong>A:</strong> ${escapeHtml(transcript)}
+                        ${audioLink}
+                    </div>
+                `;
+            });
+            answerDataHtml += '</div>';
+        } else {
+            answerDataHtml = '<span style="color: #999;">回答データなし</span>';
+        }
+
+        // Full call recording
+        const fullRecording = call.recording_sid
+            ? `<div style="margin-bottom: 10px;"><strong>全録音:</strong><br><audio controls src="${API_BASE}/audio_proxy/${call.recording_sid}" style="width: 100%;"></audio></div>`
+            : '';
 
         tbody.innerHTML += `
             <tr>
-                <td>${new Date(call.started_at).toLocaleString()}</td>
-                <td>${call.direction}</td>
-                <td>${escapeHtml(call.to_number)}</td>
-                <td>${call.status}</td>
-                <td>${call.classification || '-'}</td>
+                <td>${formatJST(call.started_at)}</td>
+                <td>${formatJapanesePhone(call.from_number)}</td>
+                <td>${formatJapanesePhone(call.to_number)}</td>
+                <td>${escapeHtml(call.scenario_name || '-')}</td>
+                <td><span class="badge ${call.status}">${call.status}</span></td>
                 <td>
-                    ${recording}
-                    <div class="transcript-box">${escapeHtml(transcript)}</div>
+                    ${fullRecording}
+                    ${answerDataHtml}
                 </td>
             </tr>
         `;

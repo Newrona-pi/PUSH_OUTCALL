@@ -1,31 +1,54 @@
 {% extends "admin/layout.html" %}
 
-{% block title %}通話履歴 - Premium Auto-Call Admin{% endblock %}
+{% block title %}通話履歴・分析 - Premium Auto-Call Admin{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/logs_extra.css">
+{% endblock %}
 
 {% block content %}
 <section id="tab-logs" class="tab-content active">
     <div class="panel">
-        <div class="header-actions">
+        <div class="header-actions" style="flex-direction: column; align-items: flex-start;">
             <h2>通話履歴・分析</h2>
-            <div class="actions-right">
-                <button class="secondary small" onclick="exportZIP()"><i class="fas fa-download"></i> ZIP一括出力</button>
-                <button class="secondary small" onclick="loadLogs()"><i class="fas fa-sync"></i> 更新</button>
-            </div>
-        </div>
 
-        <div class="filter-bar" style="margin-bottom: 1.5rem;">
-            <input type="text" id="filter-phone" placeholder="電話番号で履歴を絞り込む..." style="max-width: 300px;">
+            <!-- Scenario Filter Tabs -->
+            <div id="log-scenario-tabs"
+                style="display: flex; gap: 8px; margin-bottom: 15px; overflow-x: auto; padding-bottom: 10px; width: 100%;">
+                <!-- JS renders scenario tabs here -->
+            </div>
+
+            <!-- Filter Bar -->
+            <div class="actions filter-bar"
+                style="width: 100%; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 5px;">
+                <input type="text" id="filter-to" placeholder="To番号で検索" class="search-input" style="max-width: 250px;">
+
+                <div class="date-range" style="display: flex; gap: 5px; align-items: center;">
+                    <label>期間:</label>
+                    <input type="date" id="filter-start-date">
+                    <span>~</span>
+                    <input type="date" id="filter-end-date">
+                </div>
+
+                <button onclick="loadLogs()"><i class="fas fa-search"></i> 検索</button>
+
+                <div style="flex: 1;"></div> <!-- Spacer -->
+
+                <div class="export-actions" style="display: flex; gap: 10px;">
+                    <button onclick="exportZIP()" class="secondary"><i class="fas fa-file-archive"></i> ZIP一括DL</button>
+                </div>
+            </div>
         </div>
 
         <table id="logs-table">
             <thead>
                 <tr>
-                    <th>発生日時</th>
-                    <th>方向</th>
-                    <th>相手先番号</th>
+                    <th>日時</th>
+                    <th>From</th>
+                    <th>To</th>
+                    <th>シナリオ</th>
                     <th>通話状態</th>
-                    <th>分類タグ</th>
-                    <th>音声/記録</th>
+                    <th>回答データ / 音声</th>
                 </tr>
             </thead>
             <tbody></tbody>
@@ -37,12 +60,48 @@
 {% block scripts %}
 <script>
     document.addEventListener('DOMContentLoaded', () => {
+        loadScenarioTabs();
         loadLogs();
 
         // Setup filter handling
-        document.getElementById('filter-phone').addEventListener('keyup', (e) => {
+        document.getElementById('filter-to').addEventListener('keyup', (e) => {
             if (e.key === 'Enter') loadLogs();
         });
     });
+
+    let currentScenarioFilter = null;
+
+    async function loadScenarioTabs() {
+        const res = await fetch(`${API_BASE}/scenarios/`);
+        const scenarios = await res.json();
+
+        const tabsContainer = document.getElementById('log-scenario-tabs');
+        tabsContainer.innerHTML = `
+            <button class="log-tab-btn active" onclick="filterByScenario(null)" style="padding: 8px 16px; border: 1px solid #ddd; background: var(--primary); color: white; cursor: pointer; border-radius: 4px; font-weight: 500;">全て</button>
+        `;
+
+        scenarios.forEach(s => {
+            const btn = document.createElement('button');
+            btn.className = 'log-tab-btn';
+            btn.textContent = s.name;
+            btn.style = 'padding: 8px 16px; border: 1px solid #ddd; background: #f9f9f9; color: #333; cursor: pointer; border-radius: 4px;';
+            btn.onclick = () => filterByScenario(s.id);
+            tabsContainer.appendChild(btn);
+        });
+    }
+
+    function filterByScenario(scenarioId) {
+        currentScenarioFilter = scenarioId;
+
+        // Update button styles
+        document.querySelectorAll('.log-tab-btn').forEach(btn => {
+            btn.style.background = '#f9f9f9';
+            btn.style.color = '#333';
+        });
+        event.target.style.background = 'var(--primary)';
+        event.target.style.color = 'white';
+
+        loadLogs();
+    }
 </script>
 {% endblock %}
