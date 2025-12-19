@@ -1,3 +1,4 @@
+from datetime import datetime, timezone, timedelta
 import os
 import json
 import base64
@@ -19,7 +20,7 @@ router = APIRouter(
 )
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-VOICE = "shimmer" # ユーザー指定がないので適当なものを選択（alloy, echo, shimmer）
+VOICE = "shimmer" #alloy, echo, shimmer, ash, ballad, coral, sage,verse
 
 # Realtime API URL
 REALTIME_API_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01"
@@ -43,16 +44,22 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
         models.Question.is_active == True
     ).order_by(models.Question.sort_order).all()
     
+    ending_guidances = db.query(models.EndingGuidance).filter(
+        models.EndingGuidance.scenario_id == scenario.id
+    ).order_by(models.EndingGuidance.sort_order).all()
+    
     db.close()
 
     # Shared state
     state = {
         "current_question_index": 0,
         "questions": [q.text for q in questions],
+        "ending_texts": [e.text for e in ending_guidances],
         "mode": scenario.conversation_mode,
         "last_user_audio_time": asyncio.get_event_loop().time(),
         "silence_count": 0,
         "is_bridging": False,
+        "is_ending": False,
         "stream_sid": None
     }
 
@@ -115,42 +122,39 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
                     
                     elif response["type"] == "response.done":
                         # Post-processing after AI finishes speaking
-                        await handle_ai_response_done(openai_ws, response, state, call_sid)
+                        await handle_ai_response_done(openai_ws, response, state, call_sid, websocket)
 
                     elif response["type"] == "input_audio_buffer.speech_started":
-                        # User started speaking, maybe interrupt AI (Twilio doesn't easily support interruption via clear, but we can try)
-                        logger.info("User speech detected")
-                        # Twilio 'clear' event helps clear the buffer
+                        # User started speaking, interrupt AI
+                        logger.info("User speech detected - Interrupting AI")
                         await websocket.send_json({"event": "clear", "streamSid": state["stream_sid"]})
-                        # Also tell OpenAI to cancel current response
                         await openai_ws.send(json.dumps({"type": "response.cancel"}))
+                    
+                    elif response["type"] == "response.function_call_arguments.done":
+                        await handle_function_call(openai_ws, response, state, call_sid)
 
             except Exception as e:
                 logger.error(f"Error in receive_from_openai: {e}")
 
         async def silence_monitor():
-            while not state["is_bridging"]:
+            while not state["is_bridging"] and not state["is_ending"]:
                 await asyncio.sleep(1)
                 now = asyncio.get_event_loop().time()
                 elapsed = now - state["last_user_audio_time"]
 
                 if elapsed > scenario.silence_timeout_short:
-                    # User is silent for 15s
                     state["silence_count"] += 1
                     if elapsed > scenario.silence_timeout_long:
-                        # 60s silence -> Hang up
                         logger.info(f"Silence timeout (60s) for {call_sid}")
-                        await websocket.send_json({"event": "stop", "streamSid": state["stream_sid"]})
-                        # Need to trigger actual hangup via Twilio REST API if possible, or just close WS
                         await websocket.close()
                         break
                     
-                    # Remind user
-                    if state["silence_count"] % 15 == 0: # Approx 15s since last check
+                    # Remind user every 15s of silence
+                    if int(elapsed) % 15 == 0:
                          await openai_ws.send(json.dumps({
                              "type": "response.create",
                              "response": {
-                                 "instructions": "ユーザーの返答がありません。聞き取れなかった旨を伝え、回答を促してください。"
+                                 "instructions": "ユーザーの返答が一定時間ありません。聞き取れなかった旨をやさしく伝え、回答を促してください。"
                              }
                          }))
 
@@ -163,23 +167,20 @@ async def initialize_openai_session(openai_ws, scenario):
 モード: {scenario.conversation_mode} (A: 質問順守, B: 自由対話, C: ハイブリッド)
 
 基本ルール:
-- 日本語で話してください。
-- 親切かつ丁寧に対応してください。
-- シナリオに従って進行してください。
+- 日本語で、明るく丁寧なトーンで話してください。
+- ユーザーの話を遮らず、最後まで聞いてから応答してください。
+- 日付を聞いたら必ず復唱して確認してください。
+- 「明日」「明後日」などの相対的な日付は、必ず `calculate_date` ツールを使って特定してください。
 
-モードA（質問順守）の場合:
-- 決められた質問を1つずつ順番に聞いてください。
-- ユーザーが脱線しても、優しく元の質問に戻してください。
-- 全ての質問が済んだら、終話ガイダンスへ進んでください。
+【会話の進め方】
+1. 挨拶を行い、通話の目的を伝えます。
+2. 質問リストにある内容を順番に聞き出します。
+3. ユーザーが脱線しても、優しく元の質問ラインに戻してください。
+4. 全てのやり取りが完了したら、終話ガイダンスを読み上げ、`end_call` を呼び出して終了してください。
 
-特定のキーワードへの対応:
-- ユーザーが「興味がある」「詳しく聞きたい」「担当者と話したい」と言った場合、ブリッジ（担当者へ転送）を提案してください。
-- ユーザーが「資料が欲しい」と言った場合、SMSでの資料送付を提案してください。
-
-ブリッジの実行:
-- ブリッジが必要な場合、関数 `trigger_bridge` を呼び出してください。
-SMSの実行:
-- SMS送付が必要な場合、関数 `trigger_sms` を呼び出してください。
+【特別な対応】
+- 「担当者と話したい」「詳しく聞きたい」等の要望があれば `trigger_bridge` を実行。
+- 資料送付の希望があれば `trigger_sms` を実行。
 """
     
     session_update = {
@@ -192,14 +193,25 @@ SMSの実行:
             "tools": [
                 {
                     "type": "function",
-                    "name": "trigger_bridge",
-                    "description": "担当者に電話を転送します。ユーザーの苗字（名前）を確認した後に呼び出してください。",
+                    "name": "calculate_date",
+                    "description": "相対的な日付表現（明日、来週など）を具体的な日付に変換します。",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "user_name": {"type": "string", "description": "ユーザーの苗字"}
+                            "relative_expression": {"type": "string", "description": "相対的な表現（例：明日、3日後）"}
                         },
-                        "required": ["user_name"]
+                        "required": ["relative_expression"]
+                    }
+                },
+                {
+                    "type": "function",
+                    "name": "trigger_bridge",
+                    "description": "担当者に電話を転送します。ユーザーの承諾を得た後に実行してください。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "user_name": {"type": "string", "description": "ユーザーの名前（分かれば）"}
+                        }
                     }
                 },
                 {
@@ -211,6 +223,15 @@ SMSの実行:
                         "properties": {
                             "reason": {"type": "string", "description": "送付理由"}
                         }
+                    }
+                },
+                {
+                    "type": "function",
+                    "name": "end_call",
+                    "description": "通話を終了します。最後の挨拶を終えた直後に呼び出してください。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {}
                     }
                 }
             ],
@@ -227,30 +248,66 @@ async def send_initial_greeting(openai_ws, scenario, state):
     await openai_ws.send(json.dumps({
         "type": "response.create",
         "response": {
-            "instructions": f"以下の挨拶から開始してください: {greeting}"
+            "instructions": f"以下の内容で通話を開始してください: {greeting}"
         }
     }))
 
-async def handle_ai_response_done(openai_ws, response, state, call_sid):
-    # Check for tool calls
-    output = response.get("response", {}).get("output", [])
-    for item in output:
-        if item.get("type") == "function_call":
-            func_name = item["name"]
-            args = json.loads(item["arguments"])
+async def handle_function_call(openai_ws, response, state, call_sid):
+    func_name = response["name"]
+    call_id = response["call_id"]
+    args = json.loads(response["arguments"])
+    
+    output = ""
+    
+    if func_name == "calculate_date":
+        rel = args.get("relative_expression", "")
+        jst = timezone(timedelta(hours=9))
+        today = datetime.now(jst)
+        result_date = None
+        
+        if "明日" in rel: result_date = today + timedelta(days=1)
+        elif "明後日" in rel: result_date = today + timedelta(days=2)
+        elif "来週" in rel: result_date = today + timedelta(days=7)
+        # Add more if needed...
+        
+        if result_date:
+            date_str = result_date.strftime("%Y-%m-%d")
+            output = f"{date_str} (算出結果)"
+        else:
+            output = "日付の特定に失敗しました。詳細を確認してください。"
             
-            if func_name == "trigger_bridge":
-                logger.info(f"Triggering bridge for {call_sid} to user {args.get('user_name')}")
-                state["is_bridging"] = True
-                # Here we need to update Call record and trigger Dial
-                await execute_bridge(call_sid, args.get("user_name"))
-            
-            elif func_name == "trigger_sms":
-                logger.info(f"Triggering SMS for {call_sid}")
-                await execute_sms_log(call_sid)
+    elif func_name == "trigger_bridge":
+        state["is_bridging"] = True
+        await execute_bridge(call_sid, args.get("user_name"))
+        output = "担当者への転送を開始します。"
+        
+    elif func_name == "trigger_sms":
+        await execute_sms_log(call_sid)
+        output = "資料送付（SMS）の予約を完了しました。"
+        
+    elif func_name == "end_call":
+        state["is_ending"] = True
+        output = "通話を終了します。"
+
+    # Send function result back to OpenAI
+    await openai_ws.send(json.dumps({
+        "type": "conversation.item.create",
+        "item": {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": output
+        }
+    }))
+    await openai_ws.send(json.dumps({"type": "response.create"}))
+
+async def handle_ai_response_done(openai_ws, response, state, call_sid, websocket):
+    # Check if end_call was triggered via function or logically
+    if state["is_ending"]:
+        logger.info(f"AI requested end_call for {call_sid}")
+        await asyncio.sleep(1.5) # Wait for final audio to play
+        await websocket.close()
 
 async def execute_bridge(call_sid, user_name):
-    # This involves Twilio REST API to redirect the call to a TwiML that <Dial>s
     TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
     TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
     from twilio.rest import Client
@@ -263,7 +320,6 @@ async def execute_bridge(call_sid, user_name):
         db.commit()
         
         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        # Redirect the call to bridge endpoint
         bridge_url = f"{os.getenv('PUBLIC_BASE_URL')}/twilio/bridge_twiml?number={call.scenario.bridge_number}"
         client.calls(call_sid).update(url=bridge_url)
     db.close()
@@ -275,3 +331,4 @@ async def execute_sms_log(call_sid):
         call.sms_sent_log = True
         db.commit()
     db.close()
+

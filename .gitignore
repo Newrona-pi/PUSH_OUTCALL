@@ -12,3 +12,4 @@ venv.bak/
 app.db
 *.sqlite3
 .DS_Store
+old_project/
