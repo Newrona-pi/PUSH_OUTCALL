@@ -119,30 +119,43 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
                 try:
                     async for message in openai_ws:
                         response = json.loads(message)
+                        event_type = response.get("type")
                         
-                        if response["type"] == "response.audio.delta":
-                            audio_data = {
-                                "event": "media",
-                                "streamSid": state["stream_sid"],
-                                "media": {
-                                    "payload": response["audio"]
+                        if event_type == "response.audio.delta":
+                            # OpenAI sends audio in the 'delta' field, not 'audio'
+                            audio_delta = response.get("delta")
+                            if audio_delta and state["stream_sid"]:
+                                audio_data = {
+                                    "event": "media",
+                                    "streamSid": state["stream_sid"],
+                                    "media": {
+                                        "payload": audio_delta
+                                    }
                                 }
-                            }
-                            await websocket.send_json(audio_data)
+                                await websocket.send_json(audio_data)
+                            elif not audio_delta:
+                                logger.warning(f"response.audio.delta event but no 'delta' field. Full response: {response}")
                         
-                        elif response["type"] == "response.done":
+                        elif event_type == "response.audio.done":
+                            logger.info("AI finished speaking")
+                        
+                        elif event_type == "response.done":
                             await handle_ai_response_done(openai_ws, response, state, call_sid, websocket)
 
-                        elif response["type"] == "input_audio_buffer.speech_started":
+                        elif event_type == "input_audio_buffer.speech_started":
                             logger.info("User speech detected - Interrupting AI")
                             await websocket.send_json({"event": "clear", "streamSid": state["stream_sid"]})
                             await openai_ws.send(json.dumps({"type": "response.cancel"}))
                         
-                        elif response["type"] == "response.function_call_arguments.done":
+                        elif event_type == "response.function_call_arguments.done":
                             await handle_function_call(openai_ws, response, state, call_sid)
+                        
+                        elif event_type == "error":
+                            logger.error(f"OpenAI Error: {response}")
 
                 except Exception as e:
                     logger.error(f"Error in receive_from_openai: {e}")
+                    logger.exception("Full traceback:")
 
             async def silence_monitor():
                 while not state["is_bridging"] and not state["is_ending"]:
