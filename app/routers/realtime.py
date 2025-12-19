@@ -25,6 +25,40 @@ VOICE = "alloy" # Stable male voice
 # Realtime API URL
 REALTIME_API_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
 
+# --- Simple echo/barging-in mitigation knobs (tune as needed) ---
+# When AI is speaking, we normally do NOT forward inbound audio to OpenAI.
+# Allow barge-in only when inbound audio energy is clearly above threshold.
+USER_BARGEIN_RMS_THRESHOLD = float(os.getenv("USER_BARGEIN_RMS_THRESHOLD", "1800"))
+AI_SPEAKING_GUARD_MS = int(os.getenv("AI_SPEAKING_GUARD_MS", "200"))
+
+# μ-law decode table (256)->PCM-ish int
+def _ulaw_to_pcm(u: int) -> int:
+    u = ~u & 0xFF
+    sign = u & 0x80
+    exponent = (u >> 4) & 0x07
+    mantissa = u & 0x0F
+    magnitude = ((mantissa << 1) + 1) << (exponent + 2)
+    return -magnitude if sign else magnitude
+
+_ULAW_TABLE = [_ulaw_to_pcm(i) for i in range(256)]
+
+def _rms_ulaw(payload_b64: str) -> float:
+    """Compute rough RMS from μ-law bytes (base64). Cheap & good enough for barge-in gating."""
+    try:
+        raw = base64.b64decode(payload_b64)
+        if not raw:
+            return 0.0
+        s = 0
+        step = 2  # reduce cost
+        count = 0
+        for b in raw[::step]:
+            v = _ULAW_TABLE[b]
+            s += v * v
+            count += 1
+        return (s / max(count, 1)) ** 0.5
+    except Exception:
+        return 0.0
+
 @router.websocket("/stream/{call_sid}")
 async def handle_media_stream(websocket: WebSocket, call_sid: str):
     await websocket.accept()
@@ -58,7 +92,12 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
             "silence_count": 0,
             "is_bridging": False,
             "is_ending": False,
-            "stream_sid": None
+            "stream_sid": None,
+            # new for echo/loop mitigation
+            "ai_speaking": False,
+            "last_ai_audio_time": 0.0,
+            "barge_in_armed": False,
+            "last_nudge_time": 0.0
         }
 
         logger.info(f"Connecting to OpenAI Realtime API for call {call_sid}...")
@@ -95,13 +134,37 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
                     async for message in websocket.iter_text():
                         data = json.loads(message)
                         if data['event'] == 'media':
+                            # Optional track filter (if Twilio provides it)
+                            track = data.get("media", {}).get("track")
+                            if track and track != "inbound":
+                                continue
+
                             if not state["is_bridging"]:
-                                audio_payload = {
-                                    "type": "input_audio_buffer.append",
-                                    "audio": data['media']['payload']
-                                }
+                                payload = data['media']['payload']
+                                now = asyncio.get_event_loop().time()
+
+                                # If AI is speaking, do NOT forward audio by default to avoid echo-loop.
+                                # Allow barge-in only when energy is clearly above threshold.
+                                if state["ai_speaking"]:
+                                    if (now - state["last_ai_audio_time"]) * 1000 < AI_SPEAKING_GUARD_MS:
+                                        continue
+
+                                    rms = _rms_ulaw(payload)
+                                    if rms < USER_BARGEIN_RMS_THRESHOLD:
+                                        continue
+
+                                    # Real user barge-in detected
+                                    state["barge_in_armed"] = True
+                                    logger.info(f"Barge-in detected (rms={rms:.0f}). Canceling AI.")
+                                    if state["stream_sid"]:
+                                        await websocket.send_json({"event": "clear", "streamSid": state["stream_sid"]})
+                                    await openai_ws.send(json.dumps({"type": "response.cancel"}))
+                                    state["ai_speaking"] = False
+
+                                # Forward audio when not AI speaking (or after barge-in)
+                                audio_payload = {"type": "input_audio_buffer.append", "audio": payload}
                                 await openai_ws.send(json.dumps(audio_payload))
-                                state["last_user_audio_time"] = asyncio.get_event_loop().time()
+                                state["last_user_audio_time"] = now
                         
                         elif data['event'] == 'start':
                             state["stream_sid"] = data['start']['streamSid']
@@ -125,6 +188,8 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
                             # OpenAI sends audio in the 'delta' field, not 'audio'
                             audio_delta = response.get("delta")
                             if audio_delta and state["stream_sid"]:
+                                state["ai_speaking"] = True
+                                state["last_ai_audio_time"] = asyncio.get_event_loop().time()
                                 audio_data = {
                                     "event": "media",
                                     "streamSid": state["stream_sid"],
@@ -136,14 +201,21 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
                         
                         elif event_type == "response.audio.done":
                             logger.info("AI finished speaking")
+                            state["ai_speaking"] = False
+                            state["barge_in_armed"] = False
                         
                         elif event_type == "response.done":
                             await handle_ai_response_done(openai_ws, response, state, call_sid, websocket)
 
                         elif event_type == "input_audio_buffer.speech_started":
-                            logger.info("User speech detected - Interrupting AI")
-                            await websocket.send_json({"event": "clear", "streamSid": state["stream_sid"]})
-                            await openai_ws.send(json.dumps({"type": "response.cancel"}))
+                            # Do NOT blindly cancel on speech_started. Often triggered by echo while AI speaking.
+                            if state["ai_speaking"] and not state["barge_in_armed"]:
+                                logger.info("speech_started ignored (likely echo while AI speaking)")
+                            else:
+                                logger.info("User speech detected (honored) - canceling AI")
+                                if state["stream_sid"]:
+                                    await websocket.send_json({"event": "clear", "streamSid": state["stream_sid"]})
+                                await openai_ws.send(json.dumps({"type": "response.cancel"}))
                         
                         elif event_type == "response.function_call_arguments.done":
                             await handle_function_call(openai_ws, response, state, call_sid)
@@ -168,13 +240,15 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
                             await websocket.close()
                             break
                         
-                        if int(elapsed) % 15 == 0:
-                             await openai_ws.send(json.dumps({
-                                 "type": "response.create",
-                                 "response": {
-                                     "instructions": "ユーザーの返答が一定時間ありません。聞き取れなかった旨をやさしく伝え、回答を促してください。"
-                                 }
-                             }))
+                        # Avoid spamming response.create every second. Nudge at most once per 15s.
+                        if now - state["last_nudge_time"] >= 15 and not state["ai_speaking"]:
+                            state["last_nudge_time"] = now
+                            await openai_ws.send(json.dumps({
+                                "type": "response.create",
+                                "response": {
+                                    "instructions": "ユーザーの返答が一定時間ありません。聞き取れなかった旨をやさしく伝え、回答を促してください。"
+                                }
+                            }))
 
             await asyncio.gather(receive_from_twilio(), receive_from_openai(), silence_monitor())
     except Exception as e:
@@ -210,9 +284,10 @@ async def initialize_openai_session(openai_ws, scenario):
             "output_audio_format": "g711_ulaw",
             "turn_detection": {
                 "type": "server_vad",
-                "threshold": 0.5,
-                "prefix_padding_ms": 300,
-                "silence_duration_ms": 1000  # Default or adjusted for responsiveness
+                # raise threshold to reduce echo false positives (tunable via ENV)
+                "threshold": float(os.getenv("REALTIME_VAD_THRESHOLD", "0.7")),
+                "prefix_padding_ms": int(os.getenv("REALTIME_VAD_PREFIX_MS", "500")),
+                "silence_duration_ms": int(os.getenv("REALTIME_VAD_SILENCE_MS", "700"))
             },
             "tools": [
                 {
