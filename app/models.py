@@ -82,12 +82,6 @@ class CallTarget(Base):
     
     scenario = relationship("Scenario", back_populates="targets")
 
-class Blacklist(Base):
-    __tablename__ = "blacklist"
-    
-    phone_number = Column(String, primary_key=True) # E.164
-    reason = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
 
 class Call(Base):
     __tablename__ = "calls"

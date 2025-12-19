@@ -28,9 +28,6 @@
             <button class="tab-btn" onclick="openTab('tab-logs')">
                 <i class="fas fa-history"></i> 通話履歴・分析
             </button>
-            <button class="tab-btn" onclick="openTab('tab-blacklist')">
-                <i class="fas fa-user-slash"></i> ブラックリスト
-            </button>
         </nav>
         <div class="status-indicator">
             <span class="badge completed" style="font-size: 0.7rem; letter-spacing: 0.05em;">SYSTEM ACTIVE</span>
@@ -86,8 +83,7 @@
                                     <label>AI対話モード</label>
                                     <select id="scenario-mode">
                                         <option value="A">A: 質問順守 (安定型)</option>
-                                        <option value="B">B: 自由対話 (柔軟型)</option>
-                                        <option value="C">C: ハイブリッド (推奨)</option>
+                                        <option value="C">C: 臨機応変（応用型）</option>
                                     </select>
                                 </div>
                             </div>
@@ -193,6 +189,9 @@
                         <button class="primary" onclick="startCalls()">
                             <i class="fas fa-play-circle"></i> 一斉架電開始
                         </button>
+                        <button class="danger" onclick="stopAllCalls()" style="padding: 0.6rem 2rem;">
+                            <i class="fas fa-stop-circle"></i> 強制停止
+                        </button>
                     </div>
                 </div>
 
@@ -244,25 +243,6 @@
             </div>
         </section>
 
-        <!-- Tab 4: Blacklist -->
-        <section id="tab-blacklist" class="tab-content">
-            <div class="panel">
-                <h2>ブラックリスト管理</h2>
-                <div class="actions-bar" style="max-width: 600px;">
-                    <input type="text" id="blacklist-phone" placeholder="+81...">
-                    <button class="primary" onclick="addToBlacklist()">除外リストに追加</button>
-                </div>
-                <table id="blacklist-table" style="margin-top: 2rem;">
-                    <thead>
-                        <tr>
-                            <th>電話番号</th>
-                            <th>登録日</th>
-                            <th>登録理由</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-            </div>
         </section>
     </main>
 

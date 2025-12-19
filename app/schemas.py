@@ -83,16 +83,6 @@ class CallTarget(CallTargetBase):
     class Config:
         orm_mode = True
 
-# --- Blacklist Schemas ---
-class BlacklistBase(BaseModel):
-    phone_number: str
-    reason: Optional[str] = None
-
-class Blacklist(BlacklistBase):
-    created_at: datetime
-
-    class Config:
-        orm_mode = True
 
 # --- PhoneNumber Schemas ---
 class PhoneNumberBase(BaseModel):

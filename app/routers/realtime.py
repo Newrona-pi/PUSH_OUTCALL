@@ -164,7 +164,7 @@ async def initialize_openai_session(openai_ws, scenario):
     instructions = f"""
 あなたはオートコールシステムのAIアシスタントです。
 シナリオ名: {scenario.name}
-モード: {scenario.conversation_mode} (A: 質問順守, B: 自由対話, C: ハイブリッド)
+モード: {scenario.conversation_mode} (A: 質問順守, C: 臨機応変（応用型）)
 
 基本ルール:
 - 日本語で、明るく丁寧なトーンで話してください。

@@ -157,12 +157,7 @@ def start_calls(scenario_id: int, db: Session = Depends(get_db)):
 
     calls_triggered = 0
     for target in targets:
-        # Check Blacklist
-        blacklisted = db.query(models.Blacklist).filter(models.Blacklist.phone_number == target.phone_number).first()
-        if blacklisted:
-            target.status = "opted_out"
-            continue
-            
+
         try:
             client.calls.create(
                 to=target.phone_number,
@@ -191,21 +186,22 @@ def stop_scenario(scenario_id: int, mode: str = "soft", db: Session = Depends(ge
         db_scenario.is_active = False
     else:
         db_scenario.is_active = False
-        
     db.commit()
     return {"message": f"Scenario stopped ({mode})"}
 
-# --- Blacklist ---
-@router.post("/blacklist/", response_model=schemas.Blacklist)
-def add_to_blacklist(entry: schemas.BlacklistBase, db: Session = Depends(get_db)):
-    db_entry = models.Blacklist(**entry.dict())
-    db.merge(db_entry) # Use merge to update if exists
+@router.post("/scenarios/{scenario_id}/stop_all")
+def stop_all_calls(scenario_id: int, db: Session = Depends(get_db)):
+    targets = db.query(models.CallTarget).filter(
+        models.CallTarget.scenario_id == scenario_id,
+        models.CallTarget.status.in_(["pending", "calling"])
+    ).all()
+    
+    for t in targets:
+        t.status = "failed" # or specialized status like 'canceled'
+        
     db.commit()
-    return db_entry
+    return {"message": f"{len(targets)} calls stopped/canceled"}
 
-@router.get("/blacklist/", response_model=List[schemas.Blacklist])
-def read_blacklist(db: Session = Depends(get_db)):
-    return db.query(models.Blacklist).all()
 
 # --- Remaining endpoints (Questions, etc) ---
 # ... (keep existing or update)

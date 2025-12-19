@@ -17,7 +17,6 @@ function openTab(tabId) {
     if (tabId === 'tab-scenarios') loadScenarios();
     if (tabId === 'tab-outbound') loadOutboundScenarios();
     if (tabId === 'tab-logs') loadLogs();
-    if (tabId === 'tab-blacklist') loadBlacklist();
 }
 
 // --- Scenarios ---
@@ -283,6 +282,18 @@ async function stopScenario(mode) {
     alert(result.message);
 }
 
+async function stopAllCalls() {
+    const scenarioId = document.getElementById('outbound-scenario-select').value;
+    if (!scenarioId) { alert('シナリオを選択してください'); return; }
+
+    if (!confirm('実行中の履歴を含め、このシナリオの未完了の架電をすべて停止しますか？')) return;
+
+    const res = await fetch(`${API_BASE}/scenarios/${scenarioId}/stop_all`, { method: 'POST' });
+    const result = await res.json();
+    alert(result.message);
+    loadTargets(scenarioId);
+}
+
 // --- Logs ---
 async function loadLogs() {
     const phone = document.getElementById('filter-phone').value;
@@ -314,34 +325,6 @@ async function loadLogs() {
     });
 }
 
-// --- Blacklist ---
-async function loadBlacklist() {
-    const res = await fetch(`${API_BASE}/blacklist/`);
-    const data = await res.json();
-    const tbody = document.querySelector('#blacklist-table tbody');
-    tbody.innerHTML = '';
-    data.forEach(b => {
-        tbody.innerHTML += `
-            <tr>
-                <td>${escapeHtml(b.phone_number)}</td>
-                <td>${new Date(b.created_at).toLocaleDateString()}</td>
-                <td>${escapeHtml(b.reason || '-')}</td>
-            </tr>
-        `;
-    });
-}
-
-async function addToBlacklist() {
-    const phone = document.getElementById('blacklist-phone').value;
-    if (!phone) return;
-    await fetch(`${API_BASE}/blacklist/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone_number: phone, reason: 'Manual' })
-    });
-    document.getElementById('blacklist-phone').value = '';
-    loadBlacklist();
-}
 
 // --- Helpers ---
 function escapeHtml(text) {
