@@ -30,6 +30,8 @@ REALTIME_API_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
 # Allow barge-in only when inbound audio energy is clearly above threshold.
 USER_BARGEIN_RMS_THRESHOLD = float(os.getenv("USER_BARGEIN_RMS_THRESHOLD", "1800"))
 AI_SPEAKING_GUARD_MS = int(os.getenv("AI_SPEAKING_GUARD_MS", "200"))
+# After AI finishes speaking, suppress inbound audio briefly to avoid echo triggering VAD
+AI_POST_SPEAKING_SUPPRESS_MS = int(os.getenv("AI_POST_SPEAKING_SUPPRESS_MS", "900"))
 
 # μ-law decode table (256)->PCM-ish int
 def _ulaw_to_pcm(u: int) -> int:
@@ -96,6 +98,7 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
             # new for echo/loop mitigation
             "ai_speaking": False,
             "last_ai_audio_time": 0.0,
+            "last_ai_audio_done_time": 0.0,
             "barge_in_armed": False,
             "last_nudge_time": 0.0
         }
@@ -142,6 +145,10 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
                             if not state["is_bridging"]:
                                 payload = data['media']['payload']
                                 now = asyncio.get_event_loop().time()
+
+                                # Suppress immediate post-speech echo/noise right after AI finished speaking
+                                if state["last_ai_audio_done_time"] and (now - state["last_ai_audio_done_time"]) * 1000 < AI_POST_SPEAKING_SUPPRESS_MS:
+                                    continue
 
                                 # If AI is speaking, do NOT forward audio by default to avoid echo-loop.
                                 # Allow barge-in only when energy is clearly above threshold.
@@ -203,19 +210,24 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
                             logger.info("AI finished speaking")
                             state["ai_speaking"] = False
                             state["barge_in_armed"] = False
+                            state["last_ai_audio_done_time"] = asyncio.get_event_loop().time()
                         
                         elif event_type == "response.done":
                             await handle_ai_response_done(openai_ws, response, state, call_sid, websocket)
 
                         elif event_type == "input_audio_buffer.speech_started":
-                            # Do NOT blindly cancel on speech_started. Often triggered by echo while AI speaking.
-                            if state["ai_speaking"] and not state["barge_in_armed"]:
-                                logger.info("speech_started ignored (likely echo while AI speaking)")
-                            else:
-                                logger.info("User speech detected (honored) - canceling AI")
-                                if state["stream_sid"]:
-                                    await websocket.send_json({"event": "clear", "streamSid": state["stream_sid"]})
-                                await openai_ws.send(json.dumps({"type": "response.cancel"}))
+                            # IMPORTANT:
+                            # speech_started is noisy on phone calls (echo). Use it ONLY to interrupt when AI is currently speaking.
+                            if not state["ai_speaking"]:
+                                logger.info("speech_started ignored (AI not speaking)")
+                                continue
+                            if not state["barge_in_armed"]:
+                                logger.info("speech_started ignored (AI speaking but not armed; likely echo)")
+                                continue
+                            logger.info("User barge-in confirmed - canceling AI")
+                            if state["stream_sid"]:
+                                await websocket.send_json({"event": "clear", "streamSid": state["stream_sid"]})
+                            await openai_ws.send(json.dumps({"type": "response.cancel"}))
                         
                         elif event_type == "response.function_call_arguments.done":
                             await handle_function_call(openai_ws, response, state, call_sid)
