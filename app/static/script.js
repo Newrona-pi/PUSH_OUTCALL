@@ -219,59 +219,68 @@ if (scenarioForm) {
             const guidanceEl = document.getElementById('scenario-guidance');
             if (guidanceEl) payload.question_guidance_text = guidanceEl.value;
 
+            // 1. Save Scenario
             const scenarioUrl = id ? `${API_BASE}/scenarios/${id}` : `${API_BASE}/scenarios/`;
             const scenarioRes = await fetch(scenarioUrl, {
                 method: id ? 'PUT' : 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-            if (!scenarioRes.ok) throw new Error("Scenario save failed");
+            if (!scenarioRes.ok) throw new Error("シナリオの保存に失敗しました");
             const savedScenario = await scenarioRes.json();
 
-            // Collect current question texts from DOM
-            const questionInputs = document.querySelectorAll('.question-text-input');
-            for (let input of questionInputs) {
-                const idx = parseInt(input.dataset.index);
+            // 2. Save Questions based on DOM state
+            const questionTextareas = document.querySelectorAll('.question-text-input');
+            for (let i = 0; i < questionTextareas.length; i++) {
+                const textarea = questionTextareas[i];
+                const idx = parseInt(textarea.dataset.index);
                 const q = currentQuestions[idx];
+                if (!q) continue;
+
                 const qPayload = {
-                    text: input.value,
-                    sort_order: idx + 1,
+                    text: textarea.value,
+                    sort_order: i + 1,
                     scenario_id: savedScenario.id,
                     is_active: true
                 };
 
                 const qUrl = q.id ? `${API_BASE}/questions/${q.id}` : `${API_BASE}/questions/`;
-                await fetch(qUrl, {
+                const qRes = await fetch(qUrl, {
                     method: q.id ? 'PUT' : 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(qPayload)
                 });
+                if (!qRes.ok) console.error("Question save failed", qPayload);
             }
 
-            // Collect current ending texts from DOM
+            // 3. Save Ending Guidances based on DOM state
             const endingInputs = document.querySelectorAll('.ending-text-input');
-            for (let input of endingInputs) {
+            for (let i = 0; i < endingInputs.length; i++) {
+                const input = endingInputs[i];
                 const idx = parseInt(input.dataset.index);
                 const g = currentEndingGuidances[idx];
+                if (!g) continue;
+
                 const gPayload = {
                     text: input.value,
-                    sort_order: idx + 1,
+                    sort_order: i + 1,
                     scenario_id: savedScenario.id
                 };
 
                 const gUrl = g.id ? `${API_BASE}/ending_guidances/${g.id}` : `${API_BASE}/ending_guidances/`;
-                await fetch(gUrl, {
+                const gRes = await fetch(gUrl, {
                     method: g.id ? 'PUT' : 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(gPayload)
                 });
+                if (!gRes.ok) console.error("Ending guidance save failed", gPayload);
             }
 
             alert('保存しました');
             window.location.href = "/admin/scenarios";
         } catch (error) {
             console.error(error);
-            alert("保存に失敗しました: " + error.message);
+            alert("エラーが発生しました: " + error.message);
         }
     };
 }
