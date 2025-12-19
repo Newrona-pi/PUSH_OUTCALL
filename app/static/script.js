@@ -173,8 +173,12 @@ function renderEndingGuidances() {
 }
 
 function addQuestionToList() {
-    currentQuestions.push({ text: '', sort_order: currentQuestions.length + 1, is_new: true });
+    const textarea = document.getElementById('new-question-text');
+    const text = textarea ? textarea.value.trim() : "";
+    if (!text) return;
+    currentQuestions.push({ text, sort_order: currentQuestions.length + 1, is_new: true });
     renderQuestions();
+    if (textarea) textarea.value = '';
 }
 
 function addEndingGuidance() {
