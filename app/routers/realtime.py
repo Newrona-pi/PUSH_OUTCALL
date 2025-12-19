@@ -20,7 +20,7 @@ router = APIRouter(
 )
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-VOICE = "alloy" # Stable male voice
+VOICE = "alloy"  # Stable male voice
 
 # Realtime API URL
 REALTIME_API_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
@@ -61,6 +61,19 @@ def _rms_ulaw(payload_b64: str) -> float:
     except Exception:
         return 0.0
 
+
+async def safe_ws_send_json(ws: WebSocket, data: dict) -> bool:
+    """
+    Send JSON to Twilio websocket safely.
+    Twilio may close first; in that case, just stop sending to avoid noisy stack traces.
+    """
+    try:
+        await ws.send_json(data)
+        return True
+    except Exception:
+        return False
+
+
 @router.websocket("/stream/{call_sid}")
 async def handle_media_stream(websocket: WebSocket, call_sid: str):
     await websocket.accept()
@@ -79,11 +92,11 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
             models.Question.scenario_id == scenario.id,
             models.Question.is_active == True
         ).order_by(models.Question.sort_order).all()
-        
+
         ending_guidances = db.query(models.EndingGuidance).filter(
             models.EndingGuidance.scenario_id == scenario.id
         ).order_by(models.EndingGuidance.sort_order).all()
-        
+
         # Shared state
         state = {
             "current_question_index": 0,
@@ -104,13 +117,13 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
         }
 
         logger.info(f"Connecting to OpenAI Realtime API for call {call_sid}...")
-        
+
         # Headers for OpenAI (Note: Newer 'websockets' v13+ uses 'additional_headers')
         headers = {
             "Authorization": f"Bearer {OPENAI_API_KEY}",
             "OpenAI-Beta": "realtime=v1"
         }
-        
+
         try:
             # Try both names to be compatible with different 'websockets' versions
             openai_conn = websockets.connect(
@@ -125,9 +138,9 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
 
         async with openai_conn as openai_ws:
             logger.info(f"Connected to OpenAI successfully for call {call_sid}")
-            
-            # Initialize OpenAI Session
-            await initialize_openai_session(openai_ws, scenario)
+
+            # Initialize OpenAI Session (STRICT)
+            await initialize_openai_session(openai_ws, scenario, state)
 
             # First prompt (Greeting)
             await send_initial_greeting(openai_ws, scenario, state)
@@ -164,7 +177,7 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
                                     state["barge_in_armed"] = True
                                     logger.info(f"Barge-in detected (rms={rms:.0f}). Canceling AI.")
                                     if state["stream_sid"]:
-                                        await websocket.send_json({"event": "clear", "streamSid": state["stream_sid"]})
+                                        await safe_ws_send_json(websocket, {"event": "clear", "streamSid": state["stream_sid"]})
                                     await openai_ws.send(json.dumps({"type": "response.cancel"}))
                                     state["ai_speaking"] = False
 
@@ -172,11 +185,11 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
                                 audio_payload = {"type": "input_audio_buffer.append", "audio": payload}
                                 await openai_ws.send(json.dumps(audio_payload))
                                 state["last_user_audio_time"] = now
-                        
+
                         elif data['event'] == 'start':
                             state["stream_sid"] = data['start']['streamSid']
                             logger.info(f"Stream started: {state['stream_sid']}")
-                        
+
                         elif data['event'] == 'stop':
                             logger.info("Twilio stream stopped")
                             break
@@ -190,7 +203,7 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
                     async for message in openai_ws:
                         response = json.loads(message)
                         event_type = response.get("type")
-                        
+
                         if event_type == "response.audio.delta":
                             # OpenAI sends audio in the 'delta' field, not 'audio'
                             audio_delta = response.get("delta")
@@ -200,18 +213,16 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
                                 audio_data = {
                                     "event": "media",
                                     "streamSid": state["stream_sid"],
-                                    "media": {
-                                        "payload": audio_delta
-                                    }
+                                    "media": {"payload": audio_delta}
                                 }
-                                await websocket.send_json(audio_data)
-                        
+                                await safe_ws_send_json(websocket, audio_data)
+
                         elif event_type == "response.audio.done":
                             logger.info("AI finished speaking")
                             state["ai_speaking"] = False
                             state["barge_in_armed"] = False
                             state["last_ai_audio_done_time"] = asyncio.get_event_loop().time()
-                        
+
                         elif event_type == "response.done":
                             await handle_ai_response_done(openai_ws, response, state, call_sid, websocket)
 
@@ -226,12 +237,12 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
                                 continue
                             logger.info("User barge-in confirmed - canceling AI")
                             if state["stream_sid"]:
-                                await websocket.send_json({"event": "clear", "streamSid": state["stream_sid"]})
+                                await safe_ws_send_json(websocket, {"event": "clear", "streamSid": state["stream_sid"]})
                             await openai_ws.send(json.dumps({"type": "response.cancel"}))
-                        
+
                         elif event_type == "response.function_call_arguments.done":
                             await handle_function_call(openai_ws, response, state, call_sid)
-                        
+
                         elif event_type == "error":
                             logger.error(f"OpenAI Error: {response}")
 
@@ -240,27 +251,63 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
                     logger.exception("Full traceback:")
 
             async def silence_monitor():
+                """
+                Silence handling:
+                - 反応がない場合のリマインドは最大2回まで（ループ防止）
+                - それでも無反応なら、礼儀的に終了
+                """
                 while not state["is_bridging"] and not state["is_ending"]:
                     await asyncio.sleep(1)
                     now = asyncio.get_event_loop().time()
+
+                    # If Twilio already closed, stop monitoring
+                    if websocket.client_state.name != "CONNECTED":
+                        break
+
                     elapsed = now - state["last_user_audio_time"]
 
-                    if elapsed > scenario.silence_timeout_short:
-                        state["silence_count"] += 1
-                        if elapsed > scenario.silence_timeout_long:
-                            logger.info(f"Silence timeout (60s) for {call_sid}")
+                    # Long silence -> close
+                    if elapsed > scenario.silence_timeout_long:
+                        logger.info(f"Silence timeout ({scenario.silence_timeout_long}s) for {call_sid}")
+                        state["is_ending"] = True
+                        try:
                             await websocket.close()
+                        except Exception:
+                            pass
+                        break
+
+                    # Short silence -> gentle nudge (at most twice)
+                    if elapsed > scenario.silence_timeout_short and (now - state["last_nudge_time"] >= 15) and (not state["ai_speaking"]):
+                        state["last_nudge_time"] = now
+                        state["silence_count"] += 1
+
+                        if state["silence_count"] == 1:
+                            nudge = "お聞かせください。回答が終わったら『以上です』とお伝えください。"
+                        elif state["silence_count"] == 2:
+                            nudge = "お声が聞こえにくいようです。もう一度、ゆっくりお話しください。"
+                        else:
+                            # Too many nudges -> end politely
+                            nudge = "反応が確認できないため、いったん失礼いたします。"
+                            state["is_ending"] = True
+
+                        await openai_ws.send(json.dumps({
+                            "type": "response.create",
+                            "response": {
+                                "instructions": (
+                                    "前置き（承知しました等）なしで、次の文章だけを短く読み上げてください。\n"
+                                    f"{nudge}"
+                                )
+                            }
+                        }))
+
+                        if state["is_ending"]:
+                            await asyncio.sleep(1.0)
+                            try:
+                                await websocket.close()
+                            except Exception:
+                                pass
                             break
-                        
-                        # Avoid spamming response.create every second. Nudge at most once per 15s.
-                        if now - state["last_nudge_time"] >= 15 and not state["ai_speaking"]:
-                            state["last_nudge_time"] = now
-                            await openai_ws.send(json.dumps({
-                                "type": "response.create",
-                                "response": {
-                                    "instructions": "ユーザーの返答が一定時間ありません。聞き取れなかった旨をやさしく伝え、回答を促してください。"
-                                }
-                            }))
+
 
             await asyncio.gather(receive_from_twilio(), receive_from_openai(), silence_monitor())
     except Exception as e:
@@ -268,28 +315,60 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
     finally:
         db.close()
 
-async def initialize_openai_session(openai_ws, scenario):
+
+async def initialize_openai_session(openai_ws, scenario, state):
+    """
+    Realtime session bootstrap.
+    重要: ここで「前置き禁止」「質問ループ禁止」「終話の確実化」を強く縛る。
+    """
+    # Build explicit script for stability (less free-form = fewer hallucinated fillers)
+    questions = state.get("questions", [])
+    ending_texts = state.get("ending_texts", [])
+
+    # NOTE: ここでの指示は「絶対に従うルール」を先に置く
+    banned_phrases = [
+        "承知しました", "かしこまりました", "了解しました", "承りました",
+        "ご不明点ありますか", "他にご不明点はございますか", "何かご不明点はありますか"
+    ]
+
     instructions = f"""
-あなたはオートコールシステムのAIアシスタントです。
-シナリオ名: {scenario.name}
-モード: {scenario.conversation_mode} (A: 質問順守, C: 臨機応変)
+あなたは「一次面接の自動音声面接官」です。日本語のみで話します。
 
-基本ルール:
-- 日本語で、誠実で落ち着いた、丁寧な男性のトーンで話してください。
-- ユーザーの話を遮らず、最後まで聞いてから応答してください。
-- 日付を聞いたら必ず復唱して確認してください。
-- 「明日」「明後日」などの相対的な日付は、必ず `calculate_date` ツールを使って特定してください。
+【絶対ルール（違反禁止）】
+- 返答の冒頭に「承知しました／かしこまりました／了解しました／承りました」などの前置きを入れない。
+- 「ご不明点ありますか？」系の締め言葉を言わない。
+- 同じ質問（特に1問目）を“自分から”繰り返さない。繰り返すのは、ユーザーが「もう一度」など明示したときだけ。
+- ユーザーが話していないのに、勝手に会話を進めない（独り言禁止）。
+- 重要: 最後まで完了したら、終話ガイダンスを読み上げた“直後に”必ず end_call を実行する。
 
-【会話の進め方】
-1. 挨拶を行い、通話の目的を伝えます。
-2. 質問リストにある内容を順番に聞き出します。
-3. すべてのやり取りが完了したら、終話ガイダンスを読み上げ、`end_call` を呼び出して終了してください。
+【話し方】
+- 落ち着いた丁寧語。短く、明瞭に。
+- 文章はそのまま読み上げる（余計な相槌や言い換えを入れない）。
+
+【進行（面接モードA前提・安定動作）】
+- 質問はリストの順番で1つずつ。
+- ユーザーが回答し終えた合図は「以上です」。
+- 「以上です」を聞いたら、次の質問に進む。
+- 1問あたり最大180秒を想定。長い場合は一度だけ要点の確認をして先に進める。
+- 残り3問になったら「残り3問です」と一度だけ告知。
+
+【会社名の名乗り】
+- 最初に「カブシキガイシャパインズです」と必ず名乗る。
+
+【禁止フレーズ】（絶対に言わない）
+- {", ".join(banned_phrases)}
+
+【質問リスト】（この順番厳守）
+{chr(10).join([f"{i+1}. {q}" for i, q in enumerate(questions)])}
+
+【終話ガイダンス】（最後にこの順で読み上げる）
+{chr(10).join([f"- {t}" for t in ending_texts])}
 """
-    
+
     session_update = {
         "type": "session.update",
         "session": {
-            "instructions": instructions,
+            "instructions": instructions.strip(),
             "voice": VOICE,
             "modalities": ["text", "audio"],
             "input_audio_format": "g711_ulaw",
@@ -299,7 +378,7 @@ async def initialize_openai_session(openai_ws, scenario):
                 # raise threshold to reduce echo false positives (tunable via ENV)
                 "threshold": float(os.getenv("REALTIME_VAD_THRESHOLD", "0.7")),
                 "prefix_padding_ms": int(os.getenv("REALTIME_VAD_PREFIX_MS", "500")),
-                "silence_duration_ms": int(os.getenv("REALTIME_VAD_SILENCE_MS", "700"))
+                "silence_duration_ms": int(os.getenv("REALTIME_VAD_SILENCE_MS", "700")),
             },
             "tools": [
                 {
@@ -340,10 +419,7 @@ async def initialize_openai_session(openai_ws, scenario):
                     "type": "function",
                     "name": "end_call",
                     "description": "通話を終了します。最後の挨拶を終えた直後に呼び出してください。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {}
-                    }
+                    "parameters": {"type": "object", "properties": {}}
                 }
             ],
             "tool_choice": "auto"
@@ -351,52 +427,73 @@ async def initialize_openai_session(openai_ws, scenario):
     }
     await openai_ws.send(json.dumps(session_update))
 
+
 async def send_initial_greeting(openai_ws, scenario, state):
-    greeting = f"{scenario.greeting_text or ''} {scenario.disclaimer_text or ''} {scenario.question_guidance_text or ''}"
-    if state["questions"]:
-        greeting += f" 最初の質問です。{state['questions'][0]}"
-    
+    """
+    重要: ここで「承知しました」等が出やすいので、"指示" ではなく "読み上げ" を強制する。
+    """
+    parts = [
+        (scenario.greeting_text or "").strip(),
+        (scenario.disclaimer_text or "").strip(),
+        (scenario.question_guidance_text or "").strip(),
+    ]
+    greeting = " ".join([p for p in parts if p]).strip()
+
+    if state.get("questions"):
+        greeting = (greeting + " " if greeting else "") + f"最初の質問です。{state['questions'][0]}"
+
+    # 「前置きなし」「そのまま読み上げ」を明示して、余計な返事を防ぐ
     await openai_ws.send(json.dumps({
         "type": "response.create",
         "response": {
-            "instructions": f"以下の内容で通話を開始してください: {greeting}"
+            "instructions": (
+                "次の文章を、前置き（例: 承知しました/かしこまりました/了解しました）なしで、"
+                "一語一句なるべくそのまま読み上げてください。\n"
+                f"---\n{greeting}\n---"
+            )
         }
     }))
+
 
 async def handle_function_call(openai_ws, response, state, call_sid):
     func_name = response["name"]
     call_id = response["call_id"]
-    args = json.loads(response["arguments"])
+    args = json.loads(response.get("arguments") or "{}")
     output = ""
-    
+
     if func_name == "calculate_date":
         rel = args.get("relative_expression", "")
         jst = timezone(timedelta(hours=9))
         today = datetime.now(jst)
         result_date = None
-        if "明日" in rel: result_date = today + timedelta(days=1)
-        elif "明後日" in rel: result_date = today + timedelta(days=2)
-        elif "来週" in rel: result_date = today + timedelta(days=7)
-        
+        if "明日" in rel:
+            result_date = today + timedelta(days=1)
+        elif "明後日" in rel:
+            result_date = today + timedelta(days=2)
+        elif "来週" in rel:
+            result_date = today + timedelta(days=7)
+
         if result_date:
             date_str = result_date.strftime("%Y-%m-%d")
             output = f"{date_str} (算出結果)"
         else:
             output = "日付の特定に失敗しました。"
-            
+
     elif func_name == "trigger_bridge":
         state["is_bridging"] = True
         await execute_bridge(call_sid, args.get("user_name"))
-        output = "担当者への転送を開始します。"
-        
+        output = "担当者への転送を開始しました。"
+
     elif func_name == "trigger_sms":
         await execute_sms_log(call_sid)
-        output = "資料送付（SMS）の予約を完了しました。"
-        
+        output = "SMS送付の処理を開始しました。"
+
     elif func_name == "end_call":
+        # ここで response.create を出すと、余計な「承知しました」等が出たり、質問ループが起きやすい。
         state["is_ending"] = True
         output = "通話を終了します。"
 
+    # Function call output back to OpenAI
     await openai_ws.send(json.dumps({
         "type": "conversation.item.create",
         "item": {
@@ -405,13 +502,33 @@ async def handle_function_call(openai_ws, response, state, call_sid):
             "output": output
         }
     }))
-    await openai_ws.send(json.dumps({"type": "response.create"}))
+
+    # Only continue conversation when it is actually needed
+    if func_name == "calculate_date":
+        await openai_ws.send(json.dumps({
+            "type": "response.create",
+            "response": {
+                "instructions": (
+                    "前置きは不要です。算出した日付を短く復唱して確認し、会話を続けてください。"
+                )
+            }
+        }))
+    elif func_name in ("trigger_bridge", "trigger_sms"):
+        # bridging/sms は Twilio 側ガイダンスがあるため、AIの追加発話は不要（ループ防止）
+        return
+    elif func_name == "end_call":
+        return
+
 
 async def handle_ai_response_done(openai_ws, response, state, call_sid, websocket):
-    if state["is_ending"]:
+    if state.get("is_ending"):
         logger.info(f"AI requested end_call for {call_sid}")
-        await asyncio.sleep(1.5)
-        await websocket.close()
+        await asyncio.sleep(1.0)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
 
 async def execute_bridge(call_sid, user_name):
     TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
@@ -427,6 +544,7 @@ async def execute_bridge(call_sid, user_name):
         call.bridge_executed = True
         db.commit()
     db.close()
+
 
 async def execute_sms_log(call_sid):
     TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
