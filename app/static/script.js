@@ -328,6 +328,29 @@ async function handleFileUpload(input) {
     loadTargets(scenarioId);
 }
 
+async function addTargetManually() {
+    const scenarioId = document.getElementById('outbound-scenario-select').value;
+    const phoneInput = document.getElementById('manual-phone');
+    const phone = phoneInput.value.trim();
+
+    if (!scenarioId) { alert('シナリオを選択してください'); return; }
+    if (!phone) { alert('電話番号を入力してください'); return; }
+
+    const res = await fetch(`${API_BASE}/targets/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenario_id: parseInt(scenarioId), phone_number: phone })
+    });
+
+    if (res.ok) {
+        phoneInput.value = '';
+        loadTargets(scenarioId);
+    } else {
+        const err = await res.json();
+        alert("追加に失敗しました: " + (err.detail || "不明なエラー"));
+    }
+}
+
 async function loadTargets(scenarioId) {
     if (!scenarioId) return;
     const res = await fetch(`${API_BASE}/scenarios/${scenarioId}/targets`);

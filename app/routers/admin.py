@@ -208,6 +208,34 @@ def delete_target(target_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Target deleted"}
 
+@router.post("/targets/")
+def add_target(target_in: schemas.CallTargetCreate, db: Session = Depends(get_db)):
+    # Normalize phone
+    phone = target_in.phone_number.strip()
+    if not phone.startswith('+'):
+        if phone.startswith('0'):
+            phone = '+81' + phone[1:]
+        else:
+            phone = '+81' + phone
+            
+    existing = db.query(models.CallTarget).filter(
+        models.CallTarget.scenario_id == target_in.scenario_id,
+        models.CallTarget.phone_number == phone
+    ).first()
+    
+    if existing:
+        raise HTTPException(status_code=400, detail="Target already exists in this scenario")
+    
+    new_target = models.CallTarget(
+        scenario_id=target_in.scenario_id,
+        phone_number=phone,
+        metadata_json=json.dumps({"manual": True})
+    )
+    db.add(new_target)
+    db.commit()
+    db.refresh(new_target)
+    return new_target
+
 @router.post("/scenarios/{scenario_id}/start_calls")
 def start_calls(scenario_id: int, db: Session = Depends(get_db)):
     from twilio.rest import Client

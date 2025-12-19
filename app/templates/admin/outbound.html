@@ -19,6 +19,16 @@
                 <button class="secondary" onclick="document.getElementById('target-csv').click()">
                     <i class="fas fa-file-csv"></i> CSVインポート
                 </button>
+                <div
+                    style="display: flex; background: rgba(255,255,255,0.05); padding: 0.3rem; border-radius: 8px; border: 1px solid var(--panel-border);">
+                    <input type="text" id="manual-phone" placeholder="電話番号を手入力..."
+                        style="background:transparent; border:none; color:white; padding: 0 0.5rem; width: 140px;"
+                        onkeydown="if(event.key==='Enter') addTargetManually()">
+                    <button class="primary small" onclick="addTargetManually()"
+                        style="padding: 0.4rem 0.8rem; border-radius: 6px;">
+                        追加
+                    </button>
+                </div>
                 <button class="primary" onclick="startCalls()">
                     <i class="fas fa-play-circle"></i> 一斉架電開始
                 </button>
