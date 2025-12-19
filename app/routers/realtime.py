@@ -62,13 +62,26 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
         }
 
         logger.info(f"Connecting to OpenAI Realtime API for call {call_sid}...")
-        async with websockets.connect(
-            REALTIME_API_URL,
-            extra_headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "OpenAI-Beta": "realtime=2024-10-01"
-            }
-        ) as openai_ws:
+        
+        # Headers for OpenAI (Note: Newer 'websockets' v13+ uses 'additional_headers')
+        headers = {
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "OpenAI-Beta": "realtime=2024-10-01"
+        }
+        
+        try:
+            # Try both names to be compatible with different 'websockets' versions
+            openai_conn = websockets.connect(
+                REALTIME_API_URL,
+                additional_headers=headers
+            )
+        except TypeError:
+            openai_conn = websockets.connect(
+                REALTIME_API_URL,
+                extra_headers=headers
+            )
+
+        async with openai_conn as openai_ws:
             logger.info(f"Connected to OpenAI successfully for call {call_sid}")
             
             # Initialize OpenAI Session
