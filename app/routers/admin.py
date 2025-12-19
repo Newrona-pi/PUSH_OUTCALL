@@ -170,6 +170,15 @@ async def upload_targets(scenario_id: int, file: UploadFile = File(...), db: Ses
 def read_targets(scenario_id: int, db: Session = Depends(get_db)):
     return db.query(models.CallTarget).filter(models.CallTarget.scenario_id == scenario_id).all()
 
+@router.delete("/targets/{target_id}")
+def delete_target(target_id: int, db: Session = Depends(get_db)):
+    target = db.query(models.CallTarget).filter(models.CallTarget.id == target_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+    db.delete(target)
+    db.commit()
+    return {"message": "Target deleted"}
+
 @router.post("/scenarios/{scenario_id}/start_calls")
 def start_calls(scenario_id: int, db: Session = Depends(get_db)):
     from twilio.rest import Client

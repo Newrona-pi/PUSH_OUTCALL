@@ -17,6 +17,7 @@ async function loadScenarios() {
     const res = await fetch(`${API_BASE}/scenarios/`);
     const data = await res.json();
     const tbody = document.getElementById('scenario-list-body');
+    if (!tbody) return;
     tbody.innerHTML = '';
 
     data.forEach(s => {
@@ -51,12 +52,6 @@ async function selectScenario(scenarioId) {
     const scenario = await res.json();
     currentScenario = scenario;
 
-    currentScenario = scenario;
-
-    // Remove list-specific highlight since list is gone from this tab
-    // document.getElementById('welcome-message').classList.add('hidden'); // welcome message gone
-    // document.getElementById('scenario-editor').classList.remove('hidden'); // editor always visible
-
     document.getElementById('editor-title').textContent = "シナリオ編集: " + scenario.name;
     document.getElementById('scenario-id').value = scenario.id;
     document.getElementById('scenario-name').value = scenario.name;
@@ -67,12 +62,37 @@ async function selectScenario(scenarioId) {
     document.getElementById('scenario-timeout-long').value = scenario.silence_timeout_long || 60;
     document.getElementById('scenario-greeting').value = scenario.greeting_text || '';
     document.getElementById('scenario-disclaimer').value = scenario.disclaimer_text || '';
-    document.getElementById('scenario-guidance').value = scenario.question_guidance_text || '';
+
+    const guidance = document.getElementById('scenario-guidance');
+    if (guidance) guidance.value = scenario.question_guidance_text || '';
+
     document.getElementById('scenario-bridge').value = scenario.bridge_number || '';
     document.getElementById('scenario-sms').value = scenario.sms_template || '';
 
     loadQuestions(scenario.id);
     loadEndingGuidances(scenario.id);
+}
+
+async function copyCurrentScenario() {
+    if (!currentScenario) return;
+    const name = prompt("コピー後の名称を入力してください", currentScenario.name + "_copy");
+    if (!name) return;
+    const payload = { ...currentScenario, name };
+    delete payload.id;
+    const res = await fetch(`${API_BASE}/scenarios/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    const saved = await res.json();
+    window.location.href = `/admin/scenarios/design?id=${saved.id}`;
+}
+
+async function deleteCurrentScenario() {
+    if (!currentScenario) return;
+    if (!confirm("このシナリオを削除しますか？")) return;
+    await fetch(`${API_BASE}/scenarios/${currentScenario.id}`, { method: 'DELETE' });
+    window.location.href = "/admin/scenarios";
 }
 
 function showCreateScenarioForm() {
@@ -99,7 +119,6 @@ async function loadEndingGuidances(scenarioId) {
     renderEndingGuidances();
 }
 
-// --- Rendering ---
 function renderQuestions() {
     const container = document.getElementById('questions-container');
     container.innerHTML = '';
@@ -109,11 +128,9 @@ function renderQuestions() {
         div.innerHTML = `
             <div class="q-order">${i + 1}</div>
             <div style="flex: 1;">
-                <input type="text" value="${escapeHtml(q.text)}" onchange="updateQuestion(${i}, this.value)" style="margin-bottom: 0.5rem;">
-                <div style="display: flex; justify-content: flex-end;">
-                    <button type="button" class="danger small" onclick="removeQuestion(${i})" style="padding: 0.3rem 0.8rem; font-size: 0.75rem;">
-                        <i class="fas fa-trash-alt"></i> 削除
-                    </button>
+                <textarea onchange="updateQuestion(${i}, this.value)" style="min-height: 40px;">${escapeHtml(q.text)}</textarea>
+                <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem;">
+                    <button type="button" class="secondary small" onclick="removeQuestion(${i})">削除</button>
                 </div>
             </div>
         `;
@@ -173,64 +190,69 @@ async function removeEnding(i) {
     renderEndingGuidances();
 }
 
-document.getElementById('scenario-form').onsubmit = async (e) => {
-    e.preventDefault();
-    const id = document.getElementById('scenario-id').value;
-    const payload = {
-        name: document.getElementById('scenario-name').value,
-        greeting_text: document.getElementById('scenario-greeting').value,
-        disclaimer_text: document.getElementById('scenario-disclaimer').value,
-        question_guidance_text: document.getElementById('scenario-guidance').value,
-        conversation_mode: document.getElementById('scenario-mode').value,
-        start_time: document.getElementById('scenario-start-time').value,
-        end_time: document.getElementById('scenario-end-time').value,
-        silence_timeout_short: parseInt(document.getElementById('scenario-timeout-short').value),
-        silence_timeout_long: parseInt(document.getElementById('scenario-timeout-long').value),
-        bridge_number: document.getElementById('scenario-bridge').value,
-        sms_template: document.getElementById('scenario-sms').value,
-        is_active: true
+const scenarioForm = document.getElementById('scenario-form');
+if (scenarioForm) {
+    scenarioForm.onsubmit = async (e) => {
+        e.preventDefault();
+        const id = document.getElementById('scenario-id').value;
+        const payload = {
+            name: document.getElementById('scenario-name').value,
+            greeting_text: document.getElementById('scenario-greeting').value,
+            disclaimer_text: document.getElementById('scenario-disclaimer').value,
+            conversation_mode: document.getElementById('scenario-mode').value,
+            start_time: document.getElementById('scenario-start-time').value,
+            end_time: document.getElementById('scenario-end-time').value,
+            silence_timeout_short: parseInt(document.getElementById('scenario-timeout-short').value),
+            silence_timeout_long: parseInt(document.getElementById('scenario-timeout-long').value),
+            bridge_number: document.getElementById('scenario-bridge').value,
+            sms_template: document.getElementById('scenario-sms').value,
+            is_active: true
+        };
+
+        const guidanceEl = document.getElementById('scenario-guidance');
+        if (guidanceEl) payload.question_guidance_text = guidanceEl.value;
+
+        let url = `${API_BASE}/scenarios/`;
+        let res = await fetch(id ? url + id : url, {
+            method: id ? 'PUT' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const saved = await res.json();
+
+        // Save questions
+        for (let i = 0; i < currentQuestions.length; i++) {
+            const q = currentQuestions[i];
+            const qPayload = { text: q.text, sort_order: i + 1, scenario_id: saved.id, is_active: true };
+            await fetch(q.id ? `${API_BASE}/questions/${q.id}` : `${API_BASE}/questions/`, {
+                method: q.id ? 'PUT' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(qPayload)
+            });
+        }
+
+        // Save endings
+        for (let i = 0; i < currentEndingGuidances.length; i++) {
+            const g = currentEndingGuidances[i];
+            const gPayload = { text: g.text, sort_order: i + 1, scenario_id: saved.id };
+            await fetch(g.id ? `${API_BASE}/ending_guidances/${g.id}` : `${API_BASE}/ending_guidances/`, {
+                method: g.id ? 'PUT' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(gPayload)
+            });
+        }
+
+        alert('保存しました');
+        window.location.href = "/admin/scenarios";
     };
-
-    let url = `${API_BASE}/scenarios/`;
-    let res = await fetch(id ? url + id : url, {
-        method: id ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
-    const saved = await res.json();
-
-    // Save questions
-    for (let i = 0; i < currentQuestions.length; i++) {
-        const q = currentQuestions[i];
-        const qPayload = { text: q.text, sort_order: i + 1, scenario_id: saved.id, is_active: true };
-        await fetch(q.id ? `${API_BASE}/questions/${q.id}` : `${API_BASE}/questions/`, {
-            method: q.id ? 'PUT' : 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(qPayload)
-        });
-    }
-
-    // Save endings
-    for (let i = 0; i < currentEndingGuidances.length; i++) {
-        const g = currentEndingGuidances[i];
-        const gPayload = { text: g.text, sort_order: i + 1, scenario_id: saved.id };
-        await fetch(g.id ? `${API_BASE}/ending_guidances/${g.id}` : `${API_BASE}/ending_guidances/`, {
-            method: g.id ? 'PUT' : 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(gPayload)
-        });
-    }
-
-    alert('保存しました');
-    loadScenarios();
-    selectScenario(saved.id);
-};
+}
 
 // --- Outbound ---
 async function loadOutboundScenarios() {
     const res = await fetch(`${API_BASE}/scenarios/`);
     const scenarios = await res.json();
     const select = document.getElementById('outbound-scenario-select');
+    if (!select) return;
     select.innerHTML = '<option value="">未選択</option>';
     scenarios.forEach(s => {
         const opt = document.createElement('option');
@@ -239,7 +261,6 @@ async function loadOutboundScenarios() {
         select.appendChild(opt);
     });
 
-    // Check for scenario_id in URL
     const params = new URLSearchParams(window.location.search);
     const sid = params.get('scenario_id');
     if (sid) {
@@ -270,6 +291,7 @@ async function loadTargets(scenarioId) {
     const res = await fetch(`${API_BASE}/scenarios/${scenarioId}/targets`);
     const data = await res.json();
     const tbody = document.querySelector('#targets-table tbody');
+    if (!tbody) return;
     tbody.innerHTML = '';
     data.forEach(t => {
         tbody.innerHTML += `
@@ -277,10 +299,18 @@ async function loadTargets(scenarioId) {
                 <td>${escapeHtml(t.phone_number)}</td>
                 <td><span class="badge ${t.status}">${t.status}</span></td>
                 <td>${new Date(t.created_at).toLocaleString()}</td>
-                <td>${escapeHtml(t.metadata_json || '-')}</td>
+                <td>
+                    <button class="secondary small" onclick="deleteTarget(${t.id}, ${scenarioId})">削除</button>
+                </td>
             </tr>
         `;
     });
+}
+
+async function deleteTarget(id, scenarioId) {
+    if (!confirm('このターゲットを削除しますか？')) return;
+    await fetch(`${API_BASE}/targets/${id}`, { method: 'DELETE' });
+    loadTargets(scenarioId);
 }
 
 async function startCalls() {
@@ -293,17 +323,9 @@ async function startCalls() {
     loadTargets(scenarioId);
 }
 
-async function stopScenario(mode) {
-    if (!currentScenario) return;
-    const res = await fetch(`${API_BASE}/scenarios/${currentScenario.id}/stop?mode=${mode}`, { method: 'POST' });
-    const result = await res.json();
-    alert(result.message);
-}
-
 async function stopAllCalls() {
     const scenarioId = document.getElementById('outbound-scenario-select').value;
     if (!scenarioId) { alert('シナリオを選択してください'); return; }
-
     if (!confirm('実行中の履歴を含め、このシナリオの未完了の架電をすべて停止しますか？')) return;
 
     const res = await fetch(`${API_BASE}/scenarios/${scenarioId}/stop_all`, { method: 'POST' });
@@ -321,6 +343,7 @@ async function loadLogs() {
     const res = await fetch(url);
     const data = await res.json();
     const tbody = document.querySelector('#logs-table tbody');
+    if (!tbody) return;
     tbody.innerHTML = '';
 
     data.forEach(call => {
@@ -343,6 +366,9 @@ async function loadLogs() {
     });
 }
 
+async function exportZIP() {
+    window.location.href = `${API_BASE}/export_zip`;
+}
 
 // --- Helpers ---
 function escapeHtml(text) {
@@ -351,5 +377,3 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
-
-// Initial load removed - handled per-page
