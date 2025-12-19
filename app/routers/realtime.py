@@ -31,134 +31,132 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
     logger.info(f"WebSocket connection accepted for call: {call_sid}")
 
     db = SessionLocal()
-    call = db.query(models.Call).filter(models.Call.call_sid == call_sid).first()
-    if not call or not call.scenario:
-        logger.error(f"Call or Scenario not found for SID: {call_sid}")
-        await websocket.close()
-        db.close()
-        return
+    try:
+        call = db.query(models.Call).filter(models.Call.call_sid == call_sid).first()
+        if not call or not call.scenario:
+            logger.error(f"Call or Scenario not found for SID: {call_sid}")
+            await websocket.close()
+            return
 
-    scenario = call.scenario
-    questions = db.query(models.Question).filter(
-        models.Question.scenario_id == scenario.id,
-        models.Question.is_active == True
-    ).order_by(models.Question.sort_order).all()
-    
-    ending_guidances = db.query(models.EndingGuidance).filter(
-        models.EndingGuidance.scenario_id == scenario.id
-    ).order_by(models.EndingGuidance.sort_order).all()
-    
-    db.close()
-
-    # Shared state
-    state = {
-        "current_question_index": 0,
-        "questions": [q.text for q in questions],
-        "ending_texts": [e.text for e in ending_guidances],
-        "mode": scenario.conversation_mode,
-        "last_user_audio_time": asyncio.get_event_loop().time(),
-        "silence_count": 0,
-        "is_bridging": False,
-        "is_ending": False,
-        "stream_sid": None
-    }
-
-    async with websockets.connect(
-        REALTIME_API_URL,
-        extra_headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "OpenAI-Beta": "realtime=2024-10-01"
-        }
-    ) as openai_ws:
+        scenario = call.scenario
+        questions = db.query(models.Question).filter(
+            models.Question.scenario_id == scenario.id,
+            models.Question.is_active == True
+        ).order_by(models.Question.sort_order).all()
         
-        # Initialize OpenAI Session
-        await initialize_openai_session(openai_ws, scenario)
+        ending_guidances = db.query(models.EndingGuidance).filter(
+            models.EndingGuidance.scenario_id == scenario.id
+        ).order_by(models.EndingGuidance.sort_order).all()
+        
+        # Shared state
+        state = {
+            "current_question_index": 0,
+            "questions": [q.text for q in questions],
+            "ending_texts": [e.text for e in ending_guidances],
+            "mode": scenario.conversation_mode,
+            "last_user_audio_time": asyncio.get_event_loop().time(),
+            "silence_count": 0,
+            "is_bridging": False,
+            "is_ending": False,
+            "stream_sid": None
+        }
 
-        # First prompt (Greeting)
-        await send_initial_greeting(openai_ws, scenario, state)
+        logger.info(f"Connecting to OpenAI Realtime API for call {call_sid}...")
+        async with websockets.connect(
+            REALTIME_API_URL,
+            extra_headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "OpenAI-Beta": "realtime=2024-10-01"
+            }
+        ) as openai_ws:
+            logger.info(f"Connected to OpenAI successfully for call {call_sid}")
+            
+            # Initialize OpenAI Session
+            await initialize_openai_session(openai_ws, scenario)
 
-        async def receive_from_twilio():
-            try:
-                async for message in websocket.iter_text():
-                    data = json.loads(message)
-                    if data['event'] == 'media':
-                        if not state["is_bridging"]:
-                            # Forward audio to OpenAI
-                            audio_payload = {
-                                "type": "input_audio_buffer.append",
-                                "audio": data['media']['payload']
+            # First prompt (Greeting)
+            await send_initial_greeting(openai_ws, scenario, state)
+
+            async def receive_from_twilio():
+                try:
+                    async for message in websocket.iter_text():
+                        data = json.loads(message)
+                        if data['event'] == 'media':
+                            if not state["is_bridging"]:
+                                audio_payload = {
+                                    "type": "input_audio_buffer.append",
+                                    "audio": data['media']['payload']
+                                }
+                                await openai_ws.send(json.dumps(audio_payload))
+                                state["last_user_audio_time"] = asyncio.get_event_loop().time()
+                        
+                        elif data['event'] == 'start':
+                            state["stream_sid"] = data['start']['streamSid']
+                            logger.info(f"Stream started: {state['stream_sid']}")
+                        
+                        elif data['event'] == 'stop':
+                            logger.info("Twilio stream stopped")
+                            break
+                except WebSocketDisconnect:
+                    logger.info("Twilio WebSocket disconnected")
+                except Exception as e:
+                    logger.error(f"Error in receive_from_twilio: {e}")
+
+            async def receive_from_openai():
+                try:
+                    async for message in openai_ws:
+                        response = json.loads(message)
+                        
+                        if response["type"] == "response.audio.delta":
+                            audio_data = {
+                                "event": "media",
+                                "streamSid": state["stream_sid"],
+                                "media": {
+                                    "payload": response["audio"]
+                                }
                             }
-                            await openai_ws.send(json.dumps(audio_payload))
-                            # Update silence timer
-                            state["last_user_audio_time"] = asyncio.get_event_loop().time()
-                    
-                    elif data['event'] == 'start':
-                        state["stream_sid"] = data['start']['streamSid']
-                        logger.info(f"Stream started: {state['stream_sid']}")
-                    
-                    elif data['event'] == 'stop':
-                        logger.info("Twilio stream stopped")
-                        break
-            except WebSocketDisconnect:
-                logger.info("Twilio WebSocket disconnected")
-            except Exception as e:
-                logger.error(f"Error in receive_from_twilio: {e}")
+                            await websocket.send_json(audio_data)
+                        
+                        elif response["type"] == "response.done":
+                            await handle_ai_response_done(openai_ws, response, state, call_sid, websocket)
 
-        async def receive_from_openai():
-            try:
-                async for message in openai_ws:
-                    response = json.loads(message)
-                    
-                    if response["type"] == "response.audio.delta":
-                        # Send audio back to Twilio
-                        audio_data = {
-                            "event": "media",
-                            "streamSid": state["stream_sid"],
-                            "media": {
-                                "payload": response["audio"]
-                            }
-                        }
-                        await websocket.send_json(audio_data)
-                    
-                    elif response["type"] == "response.done":
-                        # Post-processing after AI finishes speaking
-                        await handle_ai_response_done(openai_ws, response, state, call_sid, websocket)
+                        elif response["type"] == "input_audio_buffer.speech_started":
+                            logger.info("User speech detected - Interrupting AI")
+                            await websocket.send_json({"event": "clear", "streamSid": state["stream_sid"]})
+                            await openai_ws.send(json.dumps({"type": "response.cancel"}))
+                        
+                        elif response["type"] == "response.function_call_arguments.done":
+                            await handle_function_call(openai_ws, response, state, call_sid)
 
-                    elif response["type"] == "input_audio_buffer.speech_started":
-                        # User started speaking, interrupt AI
-                        logger.info("User speech detected - Interrupting AI")
-                        await websocket.send_json({"event": "clear", "streamSid": state["stream_sid"]})
-                        await openai_ws.send(json.dumps({"type": "response.cancel"}))
-                    
-                    elif response["type"] == "response.function_call_arguments.done":
-                        await handle_function_call(openai_ws, response, state, call_sid)
+                except Exception as e:
+                    logger.error(f"Error in receive_from_openai: {e}")
 
-            except Exception as e:
-                logger.error(f"Error in receive_from_openai: {e}")
+            async def silence_monitor():
+                while not state["is_bridging"] and not state["is_ending"]:
+                    await asyncio.sleep(1)
+                    now = asyncio.get_event_loop().time()
+                    elapsed = now - state["last_user_audio_time"]
 
-        async def silence_monitor():
-            while not state["is_bridging"] and not state["is_ending"]:
-                await asyncio.sleep(1)
-                now = asyncio.get_event_loop().time()
-                elapsed = now - state["last_user_audio_time"]
+                    if elapsed > scenario.silence_timeout_short:
+                        state["silence_count"] += 1
+                        if elapsed > scenario.silence_timeout_long:
+                            logger.info(f"Silence timeout (60s) for {call_sid}")
+                            await websocket.close()
+                            break
+                        
+                        if int(elapsed) % 15 == 0:
+                             await openai_ws.send(json.dumps({
+                                 "type": "response.create",
+                                 "response": {
+                                     "instructions": "ユーザーの返答が一定時間ありません。聞き取れなかった旨をやさしく伝え、回答を促してください。"
+                                 }
+                             }))
 
-                if elapsed > scenario.silence_timeout_short:
-                    state["silence_count"] += 1
-                    if elapsed > scenario.silence_timeout_long:
-                        logger.info(f"Silence timeout (60s) for {call_sid}")
-                        await websocket.close()
-                        break
-                    
-                    # Remind user every 15s of silence
-                    if int(elapsed) % 15 == 0:
-                         await openai_ws.send(json.dumps({
-                             "type": "response.create",
-                             "response": {
-                                 "instructions": "ユーザーの返答が一定時間ありません。聞き取れなかった旨をやさしく伝え、回答を促してください。"
-                             }
-                         }))
-
-        await asyncio.gather(receive_from_twilio(), receive_from_openai(), silence_monitor())
+            await asyncio.gather(receive_from_twilio(), receive_from_openai(), silence_monitor())
+    except Exception as e:
+        logger.exception(f"CRITICAL ERROR in handle_media_stream: {e}")
+    finally:
+        db.close()
 
 async def initialize_openai_session(openai_ws, scenario):
     instructions = f"""
