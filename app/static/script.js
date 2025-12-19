@@ -93,16 +93,23 @@ async function loadEndingGuidances(scenarioId) {
     renderEndingGuidances();
 }
 
+// --- Rendering ---
 function renderQuestions() {
     const container = document.getElementById('questions-container');
     container.innerHTML = '';
     currentQuestions.forEach((q, i) => {
         const div = document.createElement('div');
-        div.className = 'item-row';
+        div.className = 'question-item';
         div.innerHTML = `
-            <span>#${i + 1}</span>
-            <input type="text" value="${escapeHtml(q.text)}" onchange="updateQuestion(${i}, this.value)">
-            <button type="button" class="danger small" onclick="removeQuestion(${i})">削除</button>
+            <div class="q-order">${i + 1}</div>
+            <div style="flex: 1;">
+                <input type="text" value="${escapeHtml(q.text)}" onchange="updateQuestion(${i}, this.value)" style="margin-bottom: 0.5rem;">
+                <div style="display: flex; justify-content: flex-end;">
+                    <button type="button" class="danger small" onclick="removeQuestion(${i})" style="padding: 0.3rem 0.8rem; font-size: 0.75rem;">
+                        <i class="fas fa-trash-alt"></i> 削除
+                    </button>
+                </div>
+            </div>
         `;
         container.appendChild(div);
     });
@@ -113,11 +120,18 @@ function renderEndingGuidances() {
     container.innerHTML = '';
     currentEndingGuidances.forEach((g, i) => {
         const div = document.createElement('div');
-        div.className = 'item-row';
+        div.className = 'question-item';
+        div.style.borderLeft = "4px solid var(--accent)";
         div.innerHTML = `
-            <span>#${i + 1}</span>
-            <input type="text" value="${escapeHtml(g.text)}" onchange="updateEnding(${i}, this.value)">
-            <button type="button" class="danger small" onclick="removeEnding(${i})">削除</button>
+            <div class="q-order" style="background: var(--accent);">${i + 1}</div>
+            <div style="flex: 1;">
+                <input type="text" value="${escapeHtml(g.text)}" onchange="updateEnding(${i}, this.value)" style="margin-bottom: 0.5rem;">
+                <div style="display: flex; justify-content: flex-end;">
+                    <button type="button" class="danger small" onclick="removeEnding(${i})" style="padding: 0.3rem 0.8rem; font-size: 0.75rem;">
+                        <i class="fas fa-trash-alt"></i> 削除
+                    </button>
+                </div>
+            </div>
         `;
         container.appendChild(div);
     });
