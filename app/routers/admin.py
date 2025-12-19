@@ -31,6 +31,50 @@ router = APIRouter(
     dependencies=[Depends(get_current_username)]
 )
 
+# --- Frontend Render (Multi-Page) ---
+from fastapi.templating import Jinja2Templates
+templates = Jinja2Templates(directory="app/templates")
+import time
+
+@router.get("/dashboard")
+@router.get("/")
+def dashboard_redirect():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/admin/scenarios")
+
+@router.get("/scenarios")
+def scenarios_list_ui(request: Request):
+    return templates.TemplateResponse("admin/scenarios_list.html", {
+        "request": request,
+        "active_page": "scenarios_list",
+        "now_timestamp": int(time.time())
+    })
+
+@router.get("/scenarios/design")
+def scenario_design_ui(request: Request, id: Optional[int] = None):
+    return templates.TemplateResponse("admin/scenario_design.html", {
+        "request": request,
+        "active_page": "scenario_design",
+        "scenario_id": id,
+        "now_timestamp": int(time.time())
+    })
+
+@router.get("/outbound")
+def outbound_ui(request: Request):
+    return templates.TemplateResponse("admin/outbound.html", {
+        "request": request,
+        "active_page": "outbound",
+        "now_timestamp": int(time.time())
+    })
+
+@router.get("/logs")
+def logs_ui(request: Request):
+    return templates.TemplateResponse("admin/logs.html", {
+        "request": request,
+        "active_page": "logs",
+        "now_timestamp": int(time.time())
+    })
+
 # Twilio credentials from environment
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
@@ -391,49 +435,6 @@ def export_calls_zip(
     
     return StreamingResponse(zip_buffer, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename={filename}"})
 
-# --- Frontend Render (Multi-Page) ---
-from fastapi.templating import Jinja2Templates
-templates = Jinja2Templates(directory="app/templates")
-import time
-
-@router.get("/dashboard")
-@router.get("/")
-def dashboard_redirect():
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/admin/scenarios")
-
-@router.get("/scenarios")
-def scenarios_list_ui(request: Request):
-    return templates.TemplateResponse("admin/scenarios_list.html", {
-        "request": request,
-        "active_page": "scenarios_list",
-        "now_timestamp": int(time.time())
-    })
-
-@router.get("/scenarios/design")
-def scenario_design_ui(request: Request, id: Optional[int] = None):
-    return templates.TemplateResponse("admin/scenario_design.html", {
-        "request": request,
-        "active_page": "scenario_design",
-        "scenario_id": id,
-        "now_timestamp": int(time.time())
-    })
-
-@router.get("/outbound")
-def outbound_ui(request: Request):
-    return templates.TemplateResponse("admin/outbound.html", {
-        "request": request,
-        "active_page": "outbound",
-        "now_timestamp": int(time.time())
-    })
-
-@router.get("/logs")
-def logs_ui(request: Request):
-    return templates.TemplateResponse("admin/logs.html", {
-        "request": request,
-        "active_page": "logs",
-        "now_timestamp": int(time.time())
-    })
 # --- Phase 2: Retry Transcription ---
 @router.post("/retranscribe/{answer_id}")
 async def retry_transcription(answer_id: int, db: Session = Depends(get_db)):
