@@ -273,8 +273,7 @@ def delete_ending_guidance(guidance_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Guidance deleted"}
 
-# ... (Recording Download and Logs keep same as before, but ensure they include new fields)
-# Re-implementing the log view with direction and classification
+# --- Logs and Analysis ---
 @router.get("/calls/", response_model=List[schemas.CallLog])
 def read_calls(
     skip: int = 0, 
@@ -310,7 +309,6 @@ def read_calls(
         
     calls = query.order_by(models.Call.started_at.desc()).offset(skip).limit(limit).all()
     return calls
- 
 
 @router.get("/export_zip")
 def export_calls_zip(
@@ -322,6 +320,8 @@ def export_calls_zip(
     db: Session = Depends(get_db)
 ):
     import pyzipper
+    import io
+    import csv
     from datetime import datetime, timedelta
     
     query = db.query(models.Call).options(
@@ -349,7 +349,6 @@ def export_calls_zip(
     
     calls = query.order_by(models.Call.started_at.desc()).all()
     
-    # helper for formatting
     def format_domestic(phone):
         if not phone: return ""
         if phone.startswith("+81"): return "0" + phone[3:]
@@ -357,10 +356,8 @@ def export_calls_zip(
         
     stream = io.StringIO()
     writer = csv.writer(stream)
-    
     writer.writerow(["CallSid", "Date", "To", "From", "ScenarioName", "Status", "Question", "AnswerType", "Transcript", "RecordingURL"])
     
-    # Message CSV Stream
     msg_stream = io.StringIO()
     msg_writer = csv.writer(msg_stream)
     msg_writer.writerow(["CallSid", "ScenarioName", "Date", "RecordingUrl", "Transcript", "RecordingSid"])
@@ -371,63 +368,70 @@ def export_calls_zip(
         to_dom = format_domestic(call.to_number)
         from_dom = format_domestic(call.from_number)
         
-        # Calls CSV
         if not call.answers:
-            writer.writerow([
-                call.call_sid, date_str, to_dom, from_dom, 
-                scenario_name, call.status, "-", "-", "-", "-"
-            ])
+            writer.writerow([call.call_sid, date_str, to_dom, from_dom, scenario_name, call.status, "-", "-", "-", "-"])
         else:
             for ans in call.answers:
                 q_text = ans.question.text if ans.question else "Unknown"
-                writer.writerow([
-                    call.call_sid, date_str, to_dom, from_dom,
-                    scenario_name, call.status, q_text, ans.answer_type, 
-                    ans.transcript_text or "", 
-                    ans.recording_url_twilio or ""
-                ])
+                writer.writerow([call.call_sid, date_str, to_dom, from_dom, scenario_name, call.status, q_text, ans.answer_type, ans.transcript_text or "", ans.recording_url_twilio or ""])
         
-        # Messages CSV
         for msg in call.messages:
-             msg_writer.writerow([
-                 call.call_sid, scenario_name, date_str,
-                 msg.recording_url or "",
-                 msg.transcript_text or "",
-                 msg.recording_sid or ""
-             ])
+             msg_writer.writerow([call.call_sid, scenario_name, date_str, msg.recording_url or "", msg.transcript_text or "", msg.recording_sid or ""])
                 
-    # Create ZIP in memory with AES encryption
     zip_buffer = io.BytesIO()
     with pyzipper.AESZipFile(zip_buffer, 'w', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
         zf.setpassword(b"attendme")
         zf.setencryption(pyzipper.WZ_AES, nbits=256)
-        
         today = datetime.now().strftime("%Y%m%d")
-        csv_filename = f"{today}_logs.csv"
-        zf.writestr(csv_filename, stream.getvalue())
-        
-        msg_filename = f"{today}_messages.csv"
-        zf.writestr(msg_filename, msg_stream.getvalue())
+        zf.writestr(f"{today}_logs.csv", stream.getvalue())
+        zf.writestr(f"{today}_messages.csv", msg_stream.getvalue())
         
     zip_buffer.seek(0)
-    
     filename = f"logs_{datetime.now().strftime('%Y%m%d%H%M')}.zip"
     
-    return StreamingResponse(
-        zip_buffer,
-        media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
+    return StreamingResponse(zip_buffer, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename={filename}"})
 
-# --- Frontend Render ---
+# --- Frontend Render (Multi-Page) ---
 from fastapi.templating import Jinja2Templates
 templates = Jinja2Templates(directory="app/templates")
+import time
 
 @router.get("/dashboard")
-def dashboard_ui(request: Request):
-    import time
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request, 
+@router.get("/")
+def dashboard_redirect():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/admin/scenarios")
+
+@router.get("/scenarios")
+def scenarios_list_ui(request: Request):
+    return templates.TemplateResponse("admin/scenarios_list.html", {
+        "request": request,
+        "active_page": "scenarios_list",
+        "now_timestamp": int(time.time())
+    })
+
+@router.get("/scenarios/design")
+def scenario_design_ui(request: Request, id: Optional[int] = None):
+    return templates.TemplateResponse("admin/scenario_design.html", {
+        "request": request,
+        "active_page": "scenario_design",
+        "scenario_id": id,
+        "now_timestamp": int(time.time())
+    })
+
+@router.get("/outbound")
+def outbound_ui(request: Request):
+    return templates.TemplateResponse("admin/outbound.html", {
+        "request": request,
+        "active_page": "outbound",
+        "now_timestamp": int(time.time())
+    })
+
+@router.get("/logs")
+def logs_ui(request: Request):
+    return templates.TemplateResponse("admin/logs.html", {
+        "request": request,
+        "active_page": "logs",
         "now_timestamp": int(time.time())
     })
 # --- Phase 2: Retry Transcription ---

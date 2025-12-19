@@ -1,0 +1,38 @@
+{% extends "admin/layout.html" %}
+
+{% block title %}シナリオ一覧 - Premium Auto-Call Admin{% endblock %}
+
+{% block content %}
+<section id="tab-scenario-list" class="tab-content active">
+    <div class="panel">
+        <div class="header-actions">
+            <h2>管理中シナリオ一覧</h2>
+            <a href="/admin/scenarios/design" class="primary">
+                <i class="fas fa-plus"></i> 新規作成
+            </a>
+        </div>
+        <table id="scenarios-table" style="margin-top: 1rem;">
+            <thead>
+                <tr>
+                    <th>シナリオ名</th>
+                    <th>対話モード</th>
+                    <th>作成日時</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="scenario-list-body">
+                <!-- JS renders list here -->
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Page specific initialization
+    document.addEventListener('DOMContentLoaded', () => {
+        loadScenarios();
+    });
+</script>
+{% endblock %}

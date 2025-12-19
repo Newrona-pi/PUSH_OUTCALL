@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Premium Auto-Call Admin{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap"
+        rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    {% block head %}{% endblock %}
+</head>
+
+<body>
+    <header>
+        <div class="logo-area">
+            <h1><i class="fas fa-robot"></i> AUTO-CALL <span
+                    style="font-weight: 300; font-size: 0.8em; opacity: 0.7;">Dynamic Series</span></h1>
+        </div>
+        <nav>
+            <a href="/admin/scenarios" class="tab-btn {% if active_page == 'scenarios_list' %}active{% endif %}">
+                <i class="fas fa-list"></i> シナリオ一覧
+            </a>
+            <a href="/admin/scenarios/design"
+                class="tab-btn {% if active_page == 'scenario_design' %}active{% endif %}">
+                <i class="fas fa-edit"></i> シナリオ設計
+            </a>
+            <a href="/admin/outbound" class="tab-btn {% if active_page == 'outbound' %}active{% endif %}">
+                <i class="fas fa-phone-alt"></i> 架電リスト
+            </a>
+            <a href="/admin/logs" class="tab-btn {% if active_page == 'logs' %}active{% endif %}">
+                <i class="fas fa-history"></i> 通話履歴・分析
+            </a>
+        </nav>
+        <div class="status-indicator">
+            <span class="badge completed" style="font-size: 0.7rem; letter-spacing: 0.05em;">SYSTEM ACTIVE</span>
+        </div>
+    </header>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="/static/script.js?v={{ now_timestamp }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+
+</html>

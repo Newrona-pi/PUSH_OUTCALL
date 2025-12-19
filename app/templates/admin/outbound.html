@@ -1,0 +1,54 @@
+{% extends "admin/layout.html" %}
+
+{% block title %}架電リスト - Premium Auto-Call Admin{% endblock %}
+
+{% block content %}
+<section id="tab-outbound" class="tab-content active">
+    <div class="panel">
+        <h2>架電実行マネージャー</h2>
+        <div class="actions-bar"
+            style="background: var(--glass); padding: 1.5rem; border-radius: 12px; border: 1px solid var(--panel-border);">
+            <div class="form-group" style="margin-bottom: 0; flex: 1;">
+                <label>適用シナリオ</label>
+                <select id="outbound-scenario-select">
+                    <option value="">未選択</option>
+                </select>
+            </div>
+            <div style="display: flex; gap: 0.5rem; align-items: flex-end;">
+                <input type="file" id="target-csv" accept=".csv" style="display:none" onchange="handleFileUpload(this)">
+                <button class="secondary" onclick="document.getElementById('target-csv').click()">
+                    <i class="fas fa-file-csv"></i> CSVインポート
+                </button>
+                <button class="primary" onclick="startCalls()">
+                    <i class="fas fa-play-circle"></i> 一斉架電開始
+                </button>
+                <button class="danger" onclick="stopAllCalls()" style="padding: 0.6rem 2rem;">
+                    <i class="fas fa-stop-circle"></i> 強制停止
+                </button>
+            </div>
+        </div>
+
+        <div style="margin-top: 2rem;">
+            <table id="targets-table">
+                <thead>
+                    <tr>
+                        <th>対象電話番号</th>
+                        <th>実行状態</th>
+                        <th>インポート日時</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        loadOutboundScenarios();
+    });
+</script>
+{% endblock %}

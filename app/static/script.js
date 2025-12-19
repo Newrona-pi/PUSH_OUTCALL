@@ -4,20 +4,12 @@ let currentQuestions = [];
 let currentEndingGuidances = [];
 let draggedElement = null;
 
-// --- Tab Switching ---
+// --- Tab Switching (Minimal support for legacy selectors) ---
 function openTab(tabId) {
-    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-    document.getElementById(tabId).classList.add('active');
-
-    // Find the button and add active class
-    const btn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.getAttribute('onclick').includes(tabId));
-    if (btn) btn.classList.add('active');
-
-    if (tabId === 'tab-scenario-list') loadScenarios();
-    if (tabId === 'tab-scenarios' && !currentScenario) showCreateScenarioForm();
-    if (tabId === 'tab-outbound') loadOutboundScenarios();
-    if (tabId === 'tab-logs') loadLogs();
+    const el = document.getElementById(tabId);
+    if (!el) return;
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
 }
 
 // --- Scenarios ---
@@ -47,19 +39,11 @@ async function loadScenarios() {
 }
 
 function editScenario(id) {
-    selectScenario(id);
-    openTab('tab-scenarios');
+    window.location.href = `/admin/scenarios/design?id=${id}`;
 }
 
 function goToCallList(id) {
-    // We don't necessarily 'select' for design here, but we set the dropdown for execution
-    openTab('tab-outbound');
-    const select = document.getElementById('outbound-scenario-select');
-    // Wait for scenarios to load in outbound tab if needed, or just set it
-    setTimeout(() => {
-        select.value = id;
-        loadTargets(id);
-    }, 100);
+    window.location.href = `/admin/outbound?scenario_id=${id}`;
 }
 
 async function selectScenario(scenarioId) {
@@ -95,11 +79,6 @@ function showCreateScenarioForm() {
     currentScenario = null;
     currentQuestions = [];
     currentEndingGuidances = [];
-
-    // Switch to design tab if not already there
-    if (document.getElementById('tab-scenarios').offsetParent === null) {
-        openTab('tab-scenarios');
-    }
 
     document.getElementById('editor-title').textContent = "新規シナリオ作成";
     document.getElementById('scenario-id').value = '';
@@ -250,12 +229,23 @@ document.getElementById('scenario-form').onsubmit = async (e) => {
 // --- Outbound ---
 async function loadOutboundScenarios() {
     const res = await fetch(`${API_BASE}/scenarios/`);
-    const data = await res.json();
+    const scenarios = await res.json();
     const select = document.getElementById('outbound-scenario-select');
-    select.innerHTML = '<option value="">シナリオを選択</option>';
-    data.forEach(s => {
-        select.innerHTML += `<option value="${s.id}">${escapeHtml(s.name)}</option>`;
+    select.innerHTML = '<option value="">未選択</option>';
+    scenarios.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name;
+        select.appendChild(opt);
     });
+
+    // Check for scenario_id in URL
+    const params = new URLSearchParams(window.location.search);
+    const sid = params.get('scenario_id');
+    if (sid) {
+        select.value = sid;
+        loadTargets(sid);
+    }
     select.onchange = (e) => loadTargets(e.target.value);
 }
 
@@ -362,5 +352,4 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Initial load
-openTab('tab-scenario-list');
+// Initial load removed - handled per-page

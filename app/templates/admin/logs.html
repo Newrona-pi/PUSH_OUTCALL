@@ -1,0 +1,48 @@
+{% extends "admin/layout.html" %}
+
+{% block title %}通話履歴 - Premium Auto-Call Admin{% endblock %}
+
+{% block content %}
+<section id="tab-logs" class="tab-content active">
+    <div class="panel">
+        <div class="header-actions">
+            <h2>通話履歴・分析</h2>
+            <div class="actions-right">
+                <button class="secondary small" onclick="exportZIP()"><i class="fas fa-download"></i> ZIP一括出力</button>
+                <button class="secondary small" onclick="loadLogs()"><i class="fas fa-sync"></i> 更新</button>
+            </div>
+        </div>
+
+        <div class="filter-bar" style="margin-bottom: 1.5rem;">
+            <input type="text" id="filter-phone" placeholder="電話番号で履歴を絞り込む..." style="max-width: 300px;">
+        </div>
+
+        <table id="logs-table">
+            <thead>
+                <tr>
+                    <th>発生日時</th>
+                    <th>方向</th>
+                    <th>相手先番号</th>
+                    <th>通話状態</th>
+                    <th>分類タグ</th>
+                    <th>音声/記録</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        loadLogs();
+
+        // Setup filter handling
+        document.getElementById('filter-phone').addEventListener('keyup', (e) => {
+            if (e.key === 'Enter') loadLogs();
+        });
+    });
+</script>
+{% endblock %}
