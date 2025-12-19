@@ -9,6 +9,7 @@ import os
 import requests
 import secrets
 from datetime import datetime
+import json
 from ..database import get_db
 from .. import models, schemas
 
@@ -132,12 +133,32 @@ from fastapi import UploadFile, File
 @router.post("/scenarios/{scenario_id}/upload_targets")
 async def upload_targets(scenario_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
     content = await file.read()
-    decoded = content.decode('utf-8').splitlines()
-    reader = csv.DictReader(decoded)
     
+    # Try different encodings
+    try:
+        decoded = content.decode('utf-8-sig') # Handles UTF-8 BOM
+    except UnicodeDecodeError:
+        try:
+            decoded = content.decode('cp932') # Handles Japanese Shift-JIS
+        except UnicodeDecodeError:
+            decoded = content.decode('utf-8', errors='ignore')
+
+    lines = decoded.splitlines()
+    reader = csv.DictReader(lines)
+    
+    # Clean headers (remove BOM or spaces)
+    if reader.fieldnames:
+        reader.fieldnames = [f.strip().replace('\ufeff', '') for f in reader.fieldnames]
+
     targets_added = 0
     for row in reader:
-        phone = row.get('phone_number') or row.get('電話番号')
+        # Support various possible header names for phone numbers
+        phone = None
+        for key in ['phone_number', '電話番号', 'tel', 'phone']:
+            if key in row:
+                phone = row[key]
+                break
+        
         if not phone: continue
         
         # Normalize
