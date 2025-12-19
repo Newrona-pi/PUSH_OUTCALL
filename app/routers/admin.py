@@ -8,7 +8,7 @@ import io
 import os
 import requests
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import json
 from ..database import get_db
 from .. import models, schemas
@@ -244,10 +244,10 @@ def start_calls(scenario_id: int, db: Session = Depends(get_db)):
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
     
-    # Check working hours
-    now = datetime.now() # System local time, should be JST in Railway if configured or handled
-    # Simple check:
-    current_time = now.strftime("%H:%M")
+    # Check working hours (Force JST)
+    jst = timezone(timedelta(hours=9))
+    now_jst = datetime.now(jst)
+    current_time = now_jst.strftime("%H:%M")
     if not (scenario.start_time <= current_time <= scenario.end_time):
         scenario.is_active = False # Auto OFF
         db.commit()
