@@ -320,7 +320,10 @@ async def execute_bridge(call_sid, user_name):
         db.commit()
         
         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        bridge_url = f"{os.getenv('PUBLIC_BASE_URL')}/twilio/bridge_twiml?number={call.scenario.bridge_number}"
+        from urllib.parse import urlparse
+        parsed_base = urlparse(os.getenv("PUBLIC_BASE_URL", ""))
+        base_domain = f"{parsed_base.scheme}://{parsed_base.netloc}"
+        bridge_url = f"{base_domain}/twilio/bridge_twiml?number={call.scenario.bridge_number}"
         client.calls(call_sid).update(url=bridge_url)
     db.close()
 

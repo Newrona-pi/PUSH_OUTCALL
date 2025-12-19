@@ -235,13 +235,6 @@ async def handle_call_logic(To: str, From: str, CallSid: str, direction: str, db
         phone_entry = db.query(models.PhoneNumber).filter(models.PhoneNumber.to_number == To).first()
         scenario = phone_entry.scenario if phone_entry else None
 
-    # Check Blacklist
-    is_blacklisted = db.query(models.Blacklist).filter(models.Blacklist.phone_number == To if direction=="outbound" else From).first()
-    if is_blacklisted:
-        vr = VoiceResponse()
-        vr.hangup()
-        return Response(content=str(vr), media_type="application/xml")
-
     # Create Call record
     call = models.Call(
         call_sid=CallSid,
@@ -272,8 +265,11 @@ async def handle_call_logic(To: str, From: str, CallSid: str, direction: str, db
 
     # Use Media Stream for GPT-Realtime
     connect = vr.connect()
-    public_url = os.getenv("PUBLIC_BASE_URL", "").replace("https://", "wss://").replace("http://", "ws://")
-    connect.stream(url=f"{public_url}/realtime/stream/{CallSid}")
+    from urllib.parse import urlparse
+    parsed_base = urlparse(os.getenv("PUBLIC_BASE_URL", ""))
+    base_domain = f"{parsed_base.scheme}://{parsed_base.netloc}"
+    ws_url = base_domain.replace("https://", "wss://").replace("http://", "ws://")
+    connect.stream(url=f"{ws_url}/realtime/stream/{CallSid}")
             
     return Response(content=str(vr), media_type="application/xml")
 

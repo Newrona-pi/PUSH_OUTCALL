@@ -262,7 +262,9 @@ def start_calls(scenario_id: int, db: Session = Depends(get_db)):
         return {"message": "No pending targets found"}
 
     client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-    base_url = os.getenv("PUBLIC_BASE_URL")
+    from urllib.parse import urlparse
+    parsed_base = urlparse(os.getenv("PUBLIC_BASE_URL", ""))
+    base_domain = f"{parsed_base.scheme}://{parsed_base.netloc}"
     from_number = os.getenv("TWILIO_FROM_NUMBER") # Need this in .env
 
     calls_triggered = 0
@@ -272,8 +274,8 @@ def start_calls(scenario_id: int, db: Session = Depends(get_db)):
             client.calls.create(
                 to=target.phone_number,
                 from_=from_number,
-                url=f"{base_url}/twilio/outbound_handler?scenario_id={scenario_id}",
-                status_callback=f"{base_url}/twilio/status_callback",
+                url=f"{base_domain}/twilio/outbound_handler?scenario_id={scenario_id}",
+                status_callback=f"{base_domain}/twilio/status_callback",
                 status_callback_event=['initiated', 'ringing', 'answered', 'completed']
             )
             target.status = "calling"
