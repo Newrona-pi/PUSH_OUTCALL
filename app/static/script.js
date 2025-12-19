@@ -2,9 +2,8 @@ const API_BASE = "/admin";
 let currentScenario = null;
 let currentQuestions = [];
 let currentEndingGuidances = [];
-let draggedElement = null;
 
-// --- Tab Switching (Minimal support for legacy selectors) ---
+// --- Tab Switching ---
 function openTab(tabId) {
     const el = document.getElementById(tabId);
     if (!el) return;
@@ -31,7 +30,7 @@ async function loadScenarios() {
                     <i class="fas fa-edit"></i> 設計
                 </button>
                 <button class="primary small" onclick="goToCallList(${s.id})">
-                    <i class="fas fa-phone"></i> 架電録
+                    <i class="fas fa-phone"></i> 架電リスト
                 </button>
             </td>
         `;
@@ -48,29 +47,35 @@ function goToCallList(id) {
 }
 
 async function selectScenario(scenarioId) {
-    const res = await fetch(`${API_BASE}/scenarios/${scenarioId}`);
-    const scenario = await res.json();
-    currentScenario = scenario;
+    try {
+        const res = await fetch(`${API_BASE}/scenarios/${scenarioId}`);
+        if (!res.ok) throw new Error("Scenario not found");
+        const scenario = await res.json();
+        currentScenario = scenario;
 
-    document.getElementById('editor-title').textContent = "シナリオ編集: " + scenario.name;
-    document.getElementById('scenario-id').value = scenario.id;
-    document.getElementById('scenario-name').value = scenario.name;
-    document.getElementById('scenario-mode').value = scenario.conversation_mode || 'A';
-    document.getElementById('scenario-start-time').value = scenario.start_time || '10:00';
-    document.getElementById('scenario-end-time').value = scenario.end_time || '18:00';
-    document.getElementById('scenario-timeout-short').value = scenario.silence_timeout_short || 15;
-    document.getElementById('scenario-timeout-long').value = scenario.silence_timeout_long || 60;
-    document.getElementById('scenario-greeting').value = scenario.greeting_text || '';
-    document.getElementById('scenario-disclaimer').value = scenario.disclaimer_text || '';
+        document.getElementById('editor-title').textContent = "シナリオ編集: " + scenario.name;
+        document.getElementById('scenario-id').value = scenario.id;
+        document.getElementById('scenario-name').value = scenario.name;
+        document.getElementById('scenario-mode').value = scenario.conversation_mode || 'A';
+        document.getElementById('scenario-start-time').value = scenario.start_time || '10:00';
+        document.getElementById('scenario-end-time').value = scenario.end_time || '18:00';
+        document.getElementById('scenario-timeout-short').value = scenario.silence_timeout_short || 15;
+        document.getElementById('scenario-timeout-long').value = scenario.silence_timeout_long || 60;
+        document.getElementById('scenario-greeting').value = scenario.greeting_text || '';
+        document.getElementById('scenario-disclaimer').value = scenario.disclaimer_text || '';
 
-    const guidance = document.getElementById('scenario-guidance');
-    if (guidance) guidance.value = scenario.question_guidance_text || '';
+        const guidance = document.getElementById('scenario-guidance');
+        if (guidance) guidance.value = scenario.question_guidance_text || '';
 
-    document.getElementById('scenario-bridge').value = scenario.bridge_number || '';
-    document.getElementById('scenario-sms').value = scenario.sms_template || '';
+        document.getElementById('scenario-bridge').value = scenario.bridge_number || '';
+        document.getElementById('scenario-sms').value = scenario.sms_template || '';
 
-    loadQuestions(scenario.id);
-    loadEndingGuidances(scenario.id);
+        await loadQuestions(scenario.id);
+        await loadEndingGuidances(scenario.id);
+    } catch (e) {
+        console.error(e);
+        alert("読み込みに失敗しました");
+    }
 }
 
 async function copyCurrentScenario() {
@@ -102,25 +107,31 @@ function showCreateScenarioForm() {
 
     document.getElementById('editor-title').textContent = "新規シナリオ作成";
     document.getElementById('scenario-id').value = '';
-    document.getElementById('scenario-form').reset();
-    document.getElementById('questions-container').innerHTML = '';
-    document.getElementById('ending-container').innerHTML = '';
+    const form = document.getElementById('scenario-form');
+    if (form) form.reset();
+    const qContainer = document.getElementById('questions-container');
+    if (qContainer) qContainer.innerHTML = '';
+    const eContainer = document.getElementById('ending-container');
+    if (eContainer) eContainer.innerHTML = '';
 }
 
 async function loadQuestions(scenarioId) {
     const res = await fetch(`${API_BASE}/scenarios/${scenarioId}/questions`);
+    if (!res.ok) return;
     currentQuestions = await res.json();
     renderQuestions();
 }
 
 async function loadEndingGuidances(scenarioId) {
     const res = await fetch(`${API_BASE}/scenarios/${scenarioId}/ending_guidances`);
+    if (!res.ok) return;
     currentEndingGuidances = await res.json();
     renderEndingGuidances();
 }
 
 function renderQuestions() {
     const container = document.getElementById('questions-container');
+    if (!container) return;
     container.innerHTML = '';
     currentQuestions.forEach((q, i) => {
         const div = document.createElement('div');
@@ -128,7 +139,7 @@ function renderQuestions() {
         div.innerHTML = `
             <div class="q-order">${i + 1}</div>
             <div style="flex: 1;">
-                <textarea onchange="updateQuestion(${i}, this.value)" style="min-height: 40px;">${escapeHtml(q.text)}</textarea>
+                <textarea class="question-text-input" data-index="${i}" style="min-height: 40px;">${escapeHtml(q.text)}</textarea>
                 <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem;">
                     <button type="button" class="secondary small" onclick="removeQuestion(${i})">削除</button>
                 </div>
@@ -140,6 +151,7 @@ function renderQuestions() {
 
 function renderEndingGuidances() {
     const container = document.getElementById('ending-container');
+    if (!container) return;
     container.innerHTML = '';
     currentEndingGuidances.forEach((g, i) => {
         const div = document.createElement('div');
@@ -148,10 +160,10 @@ function renderEndingGuidances() {
         div.innerHTML = `
             <div class="q-order" style="background: var(--accent);">${i + 1}</div>
             <div style="flex: 1;">
-                <input type="text" value="${escapeHtml(g.text)}" onchange="updateEnding(${i}, this.value)" style="margin-bottom: 0.5rem;">
+                <input type="text" class="ending-text-input" data-index="${i}" value="${escapeHtml(g.text)}" style="margin-bottom: 0.5rem;">
                 <div style="display: flex; justify-content: flex-end;">
                     <button type="button" class="danger small" onclick="removeEnding(${i})" style="padding: 0.3rem 0.8rem; font-size: 0.75rem;">
-                        <i class="fas fa-trash-alt"></i> 削除
+                        削除
                     </button>
                 </div>
             </div>
@@ -160,15 +172,9 @@ function renderEndingGuidances() {
     });
 }
 
-function updateQuestion(i, val) { currentQuestions[i].text = val; }
-function updateEnding(i, val) { currentEndingGuidances[i].text = val; }
-
 function addQuestionToList() {
-    const text = document.getElementById('new-question-text').value;
-    if (!text) return;
-    currentQuestions.push({ text, sort_order: currentQuestions.length + 1, is_new: true });
+    currentQuestions.push({ text: '', sort_order: currentQuestions.length + 1, is_new: true });
     renderQuestions();
-    document.getElementById('new-question-text').value = '';
 }
 
 function addEndingGuidance() {
@@ -178,14 +184,14 @@ function addEndingGuidance() {
 
 async function removeQuestion(i) {
     const q = currentQuestions[i];
-    if (q.id && !q.is_new) await fetch(`${API_BASE}/questions/${q.id}`, { method: 'DELETE' });
+    if (q.id) await fetch(`${API_BASE}/questions/${q.id}`, { method: 'DELETE' });
     currentQuestions.splice(i, 1);
     renderQuestions();
 }
 
 async function removeEnding(i) {
     const g = currentEndingGuidances[i];
-    if (g.id && !g.is_new) await fetch(`${API_BASE}/ending_guidances/${g.id}`, { method: 'DELETE' });
+    if (g.id) await fetch(`${API_BASE}/ending_guidances/${g.id}`, { method: 'DELETE' });
     currentEndingGuidances.splice(i, 1);
     renderEndingGuidances();
 }
@@ -194,56 +200,79 @@ const scenarioForm = document.getElementById('scenario-form');
 if (scenarioForm) {
     scenarioForm.onsubmit = async (e) => {
         e.preventDefault();
-        const id = document.getElementById('scenario-id').value;
-        const payload = {
-            name: document.getElementById('scenario-name').value,
-            greeting_text: document.getElementById('scenario-greeting').value,
-            disclaimer_text: document.getElementById('scenario-disclaimer').value,
-            conversation_mode: document.getElementById('scenario-mode').value,
-            start_time: document.getElementById('scenario-start-time').value,
-            end_time: document.getElementById('scenario-end-time').value,
-            silence_timeout_short: parseInt(document.getElementById('scenario-timeout-short').value),
-            silence_timeout_long: parseInt(document.getElementById('scenario-timeout-long').value),
-            bridge_number: document.getElementById('scenario-bridge').value,
-            sms_template: document.getElementById('scenario-sms').value,
-            is_active: true
-        };
+        try {
+            const id = document.getElementById('scenario-id').value;
+            const payload = {
+                name: document.getElementById('scenario-name').value,
+                greeting_text: document.getElementById('scenario-greeting').value,
+                disclaimer_text: document.getElementById('scenario-disclaimer').value,
+                conversation_mode: document.getElementById('scenario-mode').value,
+                start_time: document.getElementById('scenario-start-time').value,
+                end_time: document.getElementById('scenario-end-time').value,
+                silence_timeout_short: parseInt(document.getElementById('scenario-timeout-short').value) || 15,
+                silence_timeout_long: parseInt(document.getElementById('scenario-timeout-long').value) || 60,
+                bridge_number: document.getElementById('scenario-bridge').value,
+                sms_template: document.getElementById('scenario-sms').value,
+                is_active: true
+            };
 
-        const guidanceEl = document.getElementById('scenario-guidance');
-        if (guidanceEl) payload.question_guidance_text = guidanceEl.value;
+            const guidanceEl = document.getElementById('scenario-guidance');
+            if (guidanceEl) payload.question_guidance_text = guidanceEl.value;
 
-        let url = `${API_BASE}/scenarios/`;
-        let res = await fetch(id ? url + id : url, {
-            method: id ? 'PUT' : 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const saved = await res.json();
-
-        // Save questions
-        for (let i = 0; i < currentQuestions.length; i++) {
-            const q = currentQuestions[i];
-            const qPayload = { text: q.text, sort_order: i + 1, scenario_id: saved.id, is_active: true };
-            await fetch(q.id ? `${API_BASE}/questions/${q.id}` : `${API_BASE}/questions/`, {
-                method: q.id ? 'PUT' : 'POST',
+            const scenarioUrl = id ? `${API_BASE}/scenarios/${id}` : `${API_BASE}/scenarios/`;
+            const scenarioRes = await fetch(scenarioUrl, {
+                method: id ? 'PUT' : 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(qPayload)
+                body: JSON.stringify(payload)
             });
-        }
+            if (!scenarioRes.ok) throw new Error("Scenario save failed");
+            const savedScenario = await scenarioRes.json();
 
-        // Save endings
-        for (let i = 0; i < currentEndingGuidances.length; i++) {
-            const g = currentEndingGuidances[i];
-            const gPayload = { text: g.text, sort_order: i + 1, scenario_id: saved.id };
-            await fetch(g.id ? `${API_BASE}/ending_guidances/${g.id}` : `${API_BASE}/ending_guidances/`, {
-                method: g.id ? 'PUT' : 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(gPayload)
-            });
-        }
+            // Collect current question texts from DOM
+            const questionInputs = document.querySelectorAll('.question-text-input');
+            for (let input of questionInputs) {
+                const idx = parseInt(input.dataset.index);
+                const q = currentQuestions[idx];
+                const qPayload = {
+                    text: input.value,
+                    sort_order: idx + 1,
+                    scenario_id: savedScenario.id,
+                    is_active: true
+                };
 
-        alert('保存しました');
-        window.location.href = "/admin/scenarios";
+                const qUrl = q.id ? `${API_BASE}/questions/${q.id}` : `${API_BASE}/questions/`;
+                await fetch(qUrl, {
+                    method: q.id ? 'PUT' : 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(qPayload)
+                });
+            }
+
+            // Collect current ending texts from DOM
+            const endingInputs = document.querySelectorAll('.ending-text-input');
+            for (let input of endingInputs) {
+                const idx = parseInt(input.dataset.index);
+                const g = currentEndingGuidances[idx];
+                const gPayload = {
+                    text: input.value,
+                    sort_order: idx + 1,
+                    scenario_id: savedScenario.id
+                };
+
+                const gUrl = g.id ? `${API_BASE}/ending_guidances/${g.id}` : `${API_BASE}/ending_guidances/`;
+                await fetch(gUrl, {
+                    method: g.id ? 'PUT' : 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(gPayload)
+                });
+            }
+
+            alert('保存しました');
+            window.location.href = "/admin/scenarios";
+        } catch (error) {
+            console.error(error);
+            alert("保存に失敗しました: " + error.message);
+        }
     };
 }
 

@@ -170,6 +170,14 @@ async def upload_targets(scenario_id: int, file: UploadFile = File(...), db: Ses
 def read_targets(scenario_id: int, db: Session = Depends(get_db)):
     return db.query(models.CallTarget).filter(models.CallTarget.scenario_id == scenario_id).all()
 
+@router.get("/scenarios/{scenario_id}/questions", response_model=List[schemas.Question])
+def read_scenario_questions(scenario_id: int, db: Session = Depends(get_db)):
+    return db.query(models.Question).filter(models.Question.scenario_id == scenario_id).order_by(models.Question.sort_order).all()
+
+@router.get("/scenarios/{scenario_id}/ending_guidances", response_model=List[schemas.EndingGuidance])
+def read_scenario_endings(scenario_id: int, db: Session = Depends(get_db)):
+    return db.query(models.EndingGuidance).filter(models.EndingGuidance.scenario_id == scenario_id).order_by(models.EndingGuidance.sort_order).all()
+
 @router.delete("/targets/{target_id}")
 def delete_target(target_id: int, db: Session = Depends(get_db)):
     target = db.query(models.CallTarget).filter(models.CallTarget.id == target_id).first()
