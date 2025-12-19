@@ -20,7 +20,7 @@ router = APIRouter(
 )
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-VOICE = "shimmer" # Calm, stable female voice (alloy, echo, shimmer, ash, ballad, coral, sage, verse)
+VOICE = "alloy" # Stable male voice
 
 # Realtime API URL
 REALTIME_API_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
@@ -200,11 +200,11 @@ async def initialize_openai_session(openai_ws, scenario):
 モード: {scenario.conversation_mode} (A: 質問順守, C: 臨機応変（応用型）)
 
 基本ルール:
-- 日本語で、明るく丁寧なトーンで話してください。
+- 日本語で、誠実で落ち着いた、丁寧なトーンで話してください。
 - ユーザーの話を遮らず、最後まで聞いてから応答してください。
 - 日付を聞いたら必ず復唱して確認してください。
 - 「明日」「明後日」などの相対的な日付は、必ず `calculate_date` ツールを使って特定してください。
-- **話し方のトーン**: 明るく、元気で、笑顔が伝わるような話し方をしてください。少し高めのトーンで、親しみやすく話してください。
+- **話し方のトーン**: 信頼感のある、落ち着いた男性のトーンで話してください。聞き取りやすさを重視し、一言一言を丁寧に発話してください。
 
 【相槌・復唱について】
 - 相槌（「はい」「ええ」など）は最小限にしてください。多すぎるとウザがられます。

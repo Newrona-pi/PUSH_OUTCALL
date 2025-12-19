@@ -33,6 +33,8 @@ class ScenarioBase(BaseModel):
     silence_timeout_long: int = 60
     bridge_number: Optional[str] = None
     sms_template: Optional[str] = None
+    default_expand_details: bool = False
+    auto_record: bool = True
 
 class ScenarioCreate(ScenarioBase):
     pass

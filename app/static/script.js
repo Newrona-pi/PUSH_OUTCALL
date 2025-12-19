@@ -110,6 +110,10 @@ async function selectScenario(scenarioId) {
         document.getElementById('scenario-bridge').value = scenario.bridge_number || '';
         document.getElementById('scenario-sms').value = scenario.sms_template || '';
 
+        // Expansion setting
+        const expandCheck = document.getElementById('scenario-expand-details');
+        if (expandCheck) expandCheck.checked = scenario.default_expand_details || false;
+
         await loadQuestions(scenario.id);
         await loadEndingGuidances(scenario.id);
     } catch (e) {
@@ -257,6 +261,7 @@ if (scenarioForm) {
                 silence_timeout_long: parseInt(document.getElementById('scenario-timeout-long').value) || 60,
                 bridge_number: document.getElementById('scenario-bridge').value,
                 sms_template: document.getElementById('scenario-sms').value,
+                default_expand_details: document.getElementById('scenario-expand-details')?.checked || false,
                 is_active: true
             };
 
@@ -445,7 +450,13 @@ async function loadLogs() {
     const startDate = document.getElementById('filter-start-date')?.value || '';
     const endDate = document.getElementById('filter-end-date')?.value || '';
 
-    // Add cache buster
+    // 1. Fetch current scenarios to get expansion settings
+    const scRes = await fetch(`${API_BASE}/scenarios/`);
+    const scenarios = await scRes.json();
+    const scenarioMap = {};
+    scenarios.forEach(s => { scenarioMap[s.id] = s; });
+
+    // 2. Fetch Logs
     let url = `${API_BASE}/calls/?limit=100&_cb=${Date.now()}`;
     if (toNumber) url += `&to_number=${encodeURIComponent(toNumber)}`;
     if (typeof currentScenarioFilter !== 'undefined' && currentScenarioFilter) {
@@ -463,9 +474,14 @@ async function loadLogs() {
     data.forEach((call, callIdx) => {
         const detailsId = `details-${callIdx}`;
 
+        // Expansion logic based on scenario setting
+        const sc = scenarioMap[call.scenario_id];
+        const initialDisplay = sc && sc.default_expand_details ? 'block' : 'none';
+        const buttonText = sc && sc.default_expand_details ? '<i class="fas fa-eye-slash"></i> 回答詳細を隠す' : '<i class="fas fa-eye"></i> 回答詳細を表示';
+
         let answerDataHtml = '';
         if (call.answers && call.answers.length > 0) {
-            answerDataHtml = `<div id="${detailsId}" class="answer-details-container" style="display: none; max-width: 500px; margin-top: 10px; padding: 10px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px solid var(--panel-border);">`;
+            answerDataHtml = `<div id="${detailsId}" class="answer-details-container" style="display: ${initialDisplay}; max-width: 500px; margin-top: 10px; padding: 10px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px solid var(--panel-border);">`;
             call.answers.forEach((answer, idx) => {
                 const qText = answer.question_text || `質問${idx + 1}`;
                 const transcript = answer.transcript_text || '(文字起こしなし)';
@@ -490,7 +506,7 @@ async function loadLogs() {
 
         const toggleButton = call.answers && call.answers.length > 0
             ? `<button onclick="toggleAnswerDetails('${detailsId}', this)" class="secondary small" style="margin-top: 5px;">
-                <i class="fas fa-eye"></i> 回答詳細を表示
+                ${buttonText}
                </button>`
             : '';
 

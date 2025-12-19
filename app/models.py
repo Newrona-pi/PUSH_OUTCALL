@@ -25,6 +25,11 @@ class Scenario(Base):
     bridge_number = Column(String, nullable=True) # 担当者番号
     sms_template = Column(Text, nullable=True) # SMSテンプレ
     
+    # New Phase 3 setting: Default expanded details in logs
+    default_expand_details = Column(Boolean, default=False)
+    # Target condition: Voice is connected until disconnected (record everything)
+    auto_record = Column(Boolean, default=True) 
+    
     deleted_at = Column(DateTime, nullable=True) # Soft delete functionality
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
