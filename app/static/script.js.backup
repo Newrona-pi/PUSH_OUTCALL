@@ -6,41 +6,17 @@ let currentEndingGuidances = [];
 // Helper: Format date to Japan Standard Time (JST)
 function formatJST(dateString) {
     if (!dateString) return '-';
-    // Ensure the date is treated as UTC if it doesn't have a timezone offset
-    let d = dateString;
-    if (typeof d === 'string' && !d.includes('Z') && !d.includes('+') && !d.includes('GMT')) {
-        // Handle both ISO format 'T' and space separator
-        if (d.includes(' ')) {
-            d = d.replace(' ', 'T') + 'Z';
-        } else {
-            d += 'Z';
-        }
-    }
-    try {
-        return new Date(d).toLocaleString('ja-JP', {
-            timeZone: 'Asia/Tokyo',
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-        });
-    } catch (e) {
-        console.error("Date parse error:", e, dateString);
-        return dateString;
-    }
+    return new Date(dateString).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
 }
 
 // Helper: Format phone number to Japanese domestic format
 function formatJapanesePhone(phoneNumber) {
     if (!phoneNumber) return '-';
-    let clean = phoneNumber.trim();
     // Convert +81 to 0 for Japanese domestic display
-    if (clean.startsWith('+81')) {
-        return '0' + clean.substring(3);
+    if (phoneNumber.startsWith('+81')) {
+        return '0' + phoneNumber.substring(3);
     }
-    return clean;
+    return phoneNumber;
 }
 
 // --- Tab Switching ---
@@ -445,12 +421,9 @@ async function loadLogs() {
     const startDate = document.getElementById('filter-start-date')?.value || '';
     const endDate = document.getElementById('filter-end-date')?.value || '';
 
-    // Add cache buster
-    let url = `${API_BASE}/calls/?limit=100&_cb=${Date.now()}`;
+    let url = `${API_BASE}/calls/?limit=100`;
     if (toNumber) url += `&to_number=${encodeURIComponent(toNumber)}`;
-    if (typeof currentScenarioFilter !== 'undefined' && currentScenarioFilter) {
-        url += `&scenario_id=${currentScenarioFilter}`;
-    }
+    if (currentScenarioFilter) url += `&scenario_id=${currentScenarioFilter}`;
     if (startDate) url += `&start_date=${startDate}`;
     if (endDate) url += `&end_date=${endDate}`;
 
@@ -460,82 +433,49 @@ async function loadLogs() {
     if (!tbody) return;
     tbody.innerHTML = '';
 
-    data.forEach((call, callIdx) => {
-        const detailsId = `details-${callIdx}`;
-
+    data.forEach(call => {
+        // Build answer data display
         let answerDataHtml = '';
         if (call.answers && call.answers.length > 0) {
-            answerDataHtml = `<div id="${detailsId}" class="answer-details-container" style="display: none; max-width: 500px; margin-top: 10px; padding: 10px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px solid var(--panel-border);">`;
+            answerDataHtml = '<div style="max-width: 500px;">';
             call.answers.forEach((answer, idx) => {
-                const qText = answer.question_text || `質問${idx + 1}`;
+                const questionText = answer.question_text || `質問${idx + 1}`;
                 const transcript = answer.transcript_text || '(文字起こしなし)';
                 const audioLink = answer.recording_sid
-                    ? `<audio controls src="${API_BASE}/audio_proxy/${answer.recording_sid}" style="width: 100%; margin-top: 3px; height: 35px;"></audio>`
+                    ? `<audio controls src="${API_BASE}/audio_proxy/${answer.recording_sid}" style="width: 100%; margin-top: 3px;"></audio>`
                     : '';
 
                 answerDataHtml += `
-                    <div style="margin-bottom: 12px; padding: 10px; background: rgba(0, 0, 0, 0.2); border-left: 4px solid var(--primary); border-radius: 4px;">
-                        <strong style="color: var(--primary); font-size: 0.9em;">Q${idx + 1}: ${escapeHtml(qText)}</strong><br>
-                        <div style="margin-top: 4px; font-size: 0.95em;">${escapeHtml(transcript)}</div>
+                    <div style="margin-bottom: 10px; padding: 5px; background: #f9f9f9; border-left: 3px solid var(--primary);">
+                        <strong>Q${idx + 1}:</strong> ${escapeHtml(questionText)}<br>
+                        <strong>A:</strong> ${escapeHtml(transcript)}
                         ${audioLink}
                     </div>
                 `;
             });
             answerDataHtml += '</div>';
+        } else {
+            answerDataHtml = '<span style="color: #999;">回答データなし</span>';
         }
 
+        // Full call recording
         const fullRecording = call.recording_sid
-            ? `<div style="margin-bottom: 8px;"><strong>全録音:</strong><br><audio controls src="${API_BASE}/audio_proxy/${call.recording_sid}" style="width: 100%; max-width: 280px; height: 35px;"></audio></div>`
-            : '';
-
-        const toggleButton = call.answers && call.answers.length > 0
-            ? `<button onclick="toggleAnswerDetails('${detailsId}', this)" class="secondary small" style="margin-top: 5px;">
-                <i class="fas fa-eye"></i> 回答詳細を表示
-               </button>`
+            ? `<div style="margin-bottom: 10px;"><strong>全録音:</strong><br><audio controls src="${API_BASE}/audio_proxy/${call.recording_sid}" style="width: 100%;"></audio></div>`
             : '';
 
         tbody.innerHTML += `
             <tr>
-                <td style="white-space: nowrap; font-size: 0.85em;">${formatJST(call.started_at)}</td>
-                <td style="white-space: nowrap;">${formatJapanesePhone(call.from_number)}</td>
-                <td style="white-space: nowrap;">${formatJapanesePhone(call.to_number)}</td>
+                <td>${formatJST(call.started_at)}</td>
+                <td>${formatJapanesePhone(call.from_number)}</td>
+                <td>${formatJapanesePhone(call.to_number)}</td>
                 <td>${escapeHtml(call.scenario_name || '-')}</td>
                 <td><span class="badge ${call.status}">${call.status}</span></td>
                 <td>
                     ${fullRecording}
-                    ${toggleButton}
                     ${answerDataHtml}
                 </td>
             </tr>
         `;
-    });
-}
-
-function toggleAnswerDetails(detailsId, btn) {
-    const el = document.getElementById(detailsId);
-    if (!el) return;
-    if (el.style.display === 'none') {
-        el.style.display = 'block';
-        btn.innerHTML = '<i class="fas fa-eye-slash"></i> 回答詳細を隠す';
-    } else {
-        el.style.display = 'none';
-        btn.innerHTML = '<i class="fas fa-eye"></i> 回答詳細を表示';
-    }
-}
-
-function toggleAllDetails() {
-    const all = document.querySelectorAll('.answer-details-container');
-    const firstDisp = all.length > 0 ? all[0].style.display : 'none';
-    const newDisp = firstDisp === 'none' ? 'block' : 'none';
-    const newText = firstDisp === 'none' ? '<i class="fas fa-eye-slash"></i> 回答詳細を隠す' : '<i class="fas fa-eye"></i> 回答詳細を表示';
-
-    all.forEach(el => {
-        el.style.display = newDisp;
-    });
-
-    // Update all individual buttons to match
-    document.querySelectorAll('button[onclick^="toggleAnswerDetails"]').forEach(btn => {
-        btn.innerHTML = newText;
     });
 }
 

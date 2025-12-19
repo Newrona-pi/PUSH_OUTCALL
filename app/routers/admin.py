@@ -36,6 +36,7 @@ router = APIRouter(
 from fastapi.templating import Jinja2Templates
 templates = Jinja2Templates(directory="app/templates")
 import time
+templates.env.globals['now_timestamp'] = time.time
 
 @router.get("/dashboard")
 @router.get("/")
