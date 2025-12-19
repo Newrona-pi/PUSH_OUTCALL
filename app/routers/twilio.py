@@ -269,7 +269,7 @@ async def handle_call_logic(To: str, From: str, CallSid: str, direction: str, db
     parsed_base = urlparse(os.getenv("PUBLIC_BASE_URL", ""))
     base_domain = f"{parsed_base.scheme}://{parsed_base.netloc}"
     ws_url = base_domain.replace("https://", "wss://").replace("http://", "ws://")
-    connect.stream(url=f"{ws_url}/realtime/stream/{CallSid}")
+    connect.stream(url=f"{ws_url}/realtime/stream/{CallSid}", track="inbound_track")
             
     return Response(content=str(vr), media_type="application/xml")
 
