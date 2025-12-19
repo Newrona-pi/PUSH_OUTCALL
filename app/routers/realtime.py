@@ -19,11 +19,11 @@ router = APIRouter(
     tags=["realtime"],
 )
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 VOICE = "shimmer" #alloy, echo, shimmer, ash, ballad, coral, sage,verse
 
 # Realtime API URL
-REALTIME_API_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01"
+REALTIME_API_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
 
 @router.websocket("/stream/{call_sid}")
 async def handle_media_stream(websocket: WebSocket, call_sid: str):
@@ -66,7 +66,7 @@ async def handle_media_stream(websocket: WebSocket, call_sid: str):
         # Headers for OpenAI (Note: Newer 'websockets' v13+ uses 'additional_headers')
         headers = {
             "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "OpenAI-Beta": "realtime=2024-10-01"
+            "OpenAI-Beta": "realtime=v1"
         }
         
         try:
@@ -199,8 +199,10 @@ async def initialize_openai_session(openai_ws, scenario):
         "session": {
             "instructions": instructions,
             "voice": VOICE,
+            "modalities": ["text", "audio"],
             "input_audio_format": "g711_ulaw",
             "output_audio_format": "g711_ulaw",
+            "turn_detection": None,
             "tools": [
                 {
                     "type": "function",
